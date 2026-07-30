@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 
 import { AgentKitError } from '@agent-kit/core'
+import type { SessionMessage } from '@agent-kit/core'
 
 type LlmSecret = { apiKey: string; baseUrl: string; model: string }
 
@@ -28,6 +29,21 @@ export function createSqliteSecretProvider(options: { database: DatabaseSync; ma
       } catch {
         throw new AgentKitError('SECRET_NOT_CONFIGURED', 'SQLite LLM Secret 无法解密')
       }
+    },
+  }
+}
+
+/** SQLite session 表与密钥表分离，避免业务上下文与密钥混存。 */
+export function createSqliteSessionStore(database: DatabaseSync) {
+  database.exec('CREATE TABLE IF NOT EXISTS agent_sessions (session_id TEXT PRIMARY KEY, messages TEXT NOT NULL)')
+  return {
+    async save(sessionId: string, messages: SessionMessage[]) {
+      database.prepare('INSERT OR REPLACE INTO agent_sessions (session_id, messages) VALUES (?, ?)').run(sessionId, JSON.stringify(messages))
+    },
+    async load(sessionId: string): Promise<SessionMessage[]> {
+      const row = database.prepare('SELECT messages FROM agent_sessions WHERE session_id = ?').get(sessionId) as { messages?: string } | undefined
+      if (!row?.messages) return []
+      try { return JSON.parse(row.messages) as SessionMessage[] } catch { return [] }
     },
   }
 }
