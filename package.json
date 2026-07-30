@@ -1,0 +1,19 @@
+{
+  "name": "agent-kit",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260714.1",
+    "@types/node": "24.3.1",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
