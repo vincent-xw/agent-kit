@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
-import { createAgentHarness, createMemorySessionStore, createToolRegistry } from './index.js'
+import { AgentKitError, createAgentHarness, createMemorySessionStore, createToolRegistry } from './index.js'
 
 describe('AgentHarness', () => {
   it('服务端工具结果会进入下一次模型调用', async () => {
@@ -39,5 +39,14 @@ describe('AgentHarness', () => {
     })
 
     await expect(harness.run({ sessionId: 's-2', input: '读取页面', context: {} })).resolves.toEqual({ type: 'pending_tool_call', callId: 'call-2', toolName: 'browser.read_page', input: {} })
+  })
+
+  it('未注册工具返回稳定错误码', async () => {
+    const harness = createAgentHarness({
+      llm: { complete: async () => ({ type: 'tool_call', callId: 'call-3', toolName: 'unknown', input: {} }) },
+      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 3,
+    })
+
+    await expect(harness.run({ sessionId: 's-3', input: '执行未知工具', context: {} })).rejects.toMatchObject({ code: 'TOOL_NOT_REGISTERED' } satisfies Partial<AgentKitError>)
   })
 })

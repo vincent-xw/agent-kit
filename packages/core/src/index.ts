@@ -8,6 +8,14 @@ export type LlmResult = { type: 'final'; output: unknown } | ToolCall
 export type HarnessResult = LlmResult | { type: 'pending_tool_call'; callId: string; toolName: string; input: unknown }
 export type SessionMessage = { role: 'user' | 'tool'; content: unknown }
 
+/** 对外暴露稳定错误码，调用方无需依赖错误文案判断分支。 */
+export class AgentKitError extends Error {
+  constructor(readonly code: 'TOOL_NOT_REGISTERED' | 'TOOL_EXECUTOR_MISSING' | 'HARNESS_STEP_LIMIT', message: string) {
+    super(message)
+    this.name = 'AgentKitError'
+  }
+}
+
 export interface ToolDefinition<I, O> {
   name: string
   execution: 'server' | 'remote'
@@ -53,14 +61,14 @@ export function createAgentHarness(deps: Dependencies) {
           return result
         }
         const tool = deps.tools.get(result.toolName)
-        if (!tool) throw new Error(`TOOL_NOT_REGISTERED:${result.toolName}`)
+        if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${result.toolName}`)
         const input = tool.input.parse(result.input)
         if (tool.execution === 'remote') return { type: 'pending_tool_call', callId: result.callId, toolName: result.toolName, input }
-        if (!tool.execute) throw new Error(`TOOL_EXECUTOR_MISSING:${result.toolName}`)
+        if (!tool.execute) throw new AgentKitError('TOOL_EXECUTOR_MISSING', `服务端工具缺少执行器：${result.toolName}`)
         // 工具输出必须再次校验，避免未受控数据进入后续模型上下文。
         messages.push({ role: 'tool', content: tool.output.parse(await tool.execute(input)) })
       }
-      throw new Error('HARNESS_STEP_LIMIT')
+      throw new AgentKitError('HARNESS_STEP_LIMIT', `工具调用超过最大步数：${deps.maxSteps}`)
     },
   }
 }
