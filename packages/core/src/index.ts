@@ -10,7 +10,7 @@ export type SessionMessage = { role: 'user' | 'tool'; content: unknown }
 
 /** 对外暴露稳定错误码，调用方无需依赖错误文案判断分支。 */
 export class AgentKitError extends Error {
-  constructor(readonly code: 'TOOL_NOT_REGISTERED' | 'TOOL_EXECUTOR_MISSING' | 'HARNESS_STEP_LIMIT', message: string) {
+  constructor(readonly code: 'SECRET_NOT_CONFIGURED' | 'TOOL_NOT_REGISTERED' | 'TOOL_EXECUTOR_MISSING' | 'HARNESS_STEP_LIMIT', message: string) {
     super(message)
     this.name = 'AgentKitError'
   }
