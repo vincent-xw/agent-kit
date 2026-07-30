@@ -16,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agent-kit/core": "workspace:*"
+    "@agent-kit/core": "workspace:*",
+    "hono": "4.8.5"
   }
 }
