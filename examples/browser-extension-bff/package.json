@@ -1,0 +1,22 @@
+{
+  "name": "browser-extension-bff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agent-kit/adapter-sqlite": "workspace:*",
+    "@agent-kit/bff-hono": "workspace:*"
+  }
+}
