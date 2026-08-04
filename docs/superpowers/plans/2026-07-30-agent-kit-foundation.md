@@ -35,7 +35,7 @@
 - Produces：包名 `@agent-kit/core`、`@agent-kit/adapter-cloudflare`、`@agent-kit/adapter-sqlite`、`@agent-kit/bff-hono`。
 - Produces：根命令 `pnpm typecheck`、`pnpm test`、`pnpm build`。
 
-- [ ] **Step 1: 为 core 写入空导出测试**
+- [x] **Step 1: 为 core 写入空导出测试**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -48,13 +48,13 @@ describe('core package', () => {
 })
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `pnpm --filter @agent-kit/core test`
 
 Expected: FAIL，原因是 package 与入口尚不存在。
 
-- [ ] **Step 3: 创建 pnpm workspace 与统一 TypeScript 配置**
+- [x] **Step 3: 创建 pnpm workspace 与统一 TypeScript 配置**
 
 ```json
 {
@@ -68,13 +68,13 @@ Expected: FAIL，原因是 package 与入口尚不存在。
 
 为每个包创建 ESM `package.json` 与 `src/index.ts`，仅 core 导出 `AGENT_KIT_VERSION = '0.1.0'`；其它包暂不导出业务实现。
 
-- [ ] **Step 4: 运行根校验**
+- [x] **Step 4: 运行根校验**
 
 Run: `pnpm install && pnpm typecheck && pnpm test && pnpm build`
 
 Expected: PASS，四个 workspace 包均能被 TypeScript 构建。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json pnpm-workspace.yaml tsconfig.base.json vitest.workspace.ts .gitignore packages
@@ -98,7 +98,7 @@ git commit -m "chore: initialize agent kit workspace"
 - Produces：`createAgentHarness(deps).run({ sessionId, input, context })`。
 - Produces：`ToolRegistry.register(definition)`，工具定义含 Zod 输入/输出 Schema 与 `execution: 'server' | 'remote'`。
 
-- [ ] **Step 1: 写入 harness 失败测试**
+- [x] **Step 1: 写入 harness 失败测试**
 
 ```ts
 it('服务端工具结果会进入下一次模型调用', async () => {
@@ -114,13 +114,13 @@ it('远端工具返回 pending_tool_call 且不执行工具', async () => {
 })
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 Run: `pnpm --filter @agent-kit/core test -- harness.test.ts`
 
 Expected: FAIL，原因是 `createAgentHarness` 尚未导出。
 
-- [ ] **Step 3: 以最小契约实现 core**
+- [x] **Step 3: 以最小契约实现 core**
 
 ```ts
 export type HarnessResult =
@@ -135,13 +135,13 @@ export interface AgentHarness {
 
 工具调用前必须校验已注册工具、输入 Schema、`maxSteps`；工具结果必须校验输出 Schema。错误统一抛出带 `code` 的 `AgentKitError`，至少含 `SECRET_NOT_CONFIGURED`、`TOOL_NOT_REGISTERED`、`TOOL_INPUT_INVALID`、`TOOL_OUTPUT_INVALID`、`HARNESS_STEP_LIMIT`、`LLM_RESPONSE_INVALID`。
 
-- [ ] **Step 4: 运行 core 校验**
+- [x] **Step 4: 运行 core 校验**
 
 Run: `pnpm --filter @agent-kit/core typecheck && pnpm --filter @agent-kit/core test`
 
 Expected: PASS，覆盖文本完成、服务端工具、远端工具、输入无效、输出无效与步数上限。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core
@@ -165,7 +165,7 @@ git commit -m "feat(core): add context and tool harness"
 - Consumes：core 的 `SecretProvider`、`SessionStore` 与 `LlmConfig`。
 - Produces：`createCloudflareAgentRuntime(env, options)` 和 `createSqliteAgentRuntime(options)`。
 
-- [ ] **Step 1: 写入适配器失败测试**
+- [x] **Step 1: 写入适配器失败测试**
 
 ```ts
 it('Cloudflare 只读取显式 Binding', async () => {
@@ -178,25 +178,25 @@ it('SQLite 只保存密文，不保存 API Key 明文', async () => {
 })
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 Run: `pnpm --filter @agent-kit/adapter-cloudflare test && pnpm --filter @agent-kit/adapter-sqlite test`
 
 Expected: FAIL，原因是两个 runtime factory 尚不存在。
 
-- [ ] **Step 3: 实现两个适配器**
+- [x] **Step 3: 实现两个适配器**
 
 Cloudflare adapter 接收 `env` 与 `{ apiKeyBinding, baseUrlBinding, modelBinding, database }`；任一 Binding 为空即返回 `SECRET_NOT_CONFIGURED`。D1 建表保存 session 消息和更新时间。
 
 SQLite adapter 使用 `node:sqlite`；`agent_secrets` 表仅保存 AES-GCM 的 `ciphertext`、`iv` 与 `key_version`，`agent_sessions` 表保存 JSON context。`AGENT_KIT_MASTER_KEY` 缺失、不是 32 字节 base64url 值或解密失败时均返回明确错误；不得生成临时主密钥。
 
-- [ ] **Step 4: 运行适配器校验**
+- [x] **Step 4: 运行适配器校验**
 
 Run: `pnpm --filter @agent-kit/adapter-cloudflare typecheck && pnpm --filter @agent-kit/adapter-cloudflare test && pnpm --filter @agent-kit/adapter-sqlite typecheck && pnpm --filter @agent-kit/adapter-sqlite test`
 
 Expected: PASS，密钥、加密存储、D1 session 与缺失配置分支均被覆盖。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/adapter-cloudflare packages/adapter-sqlite
@@ -219,7 +219,7 @@ git commit -m "feat(adapters): add cloudflare and sqlite runtimes"
 - Produces：`createAgentBff({ harness, authenticate })`。
 - Produces：`POST /v1/agent/sessions/:sessionId/run` 与 `POST /v1/agent/sessions/:sessionId/tool-results/:callId`。
 
-- [ ] **Step 1: 写入 BFF 失败测试**
+- [x] **Step 1: 写入 BFF 失败测试**
 
 ```ts
 it('未鉴权请求返回 401', async () => {
@@ -233,23 +233,23 @@ it('远端工具调用只返回白名单协议', async () => {
 })
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 Run: `pnpm --filter @agent-kit/bff-hono test -- routes.test.ts`
 
 Expected: FAIL，原因是 `createAgentBff` 尚不存在。
 
-- [ ] **Step 3: 实现 BFF 和 Tool Host 协议**
+- [x] **Step 3: 实现 BFF 和 Tool Host 协议**
 
 请求 body 严格为 `{ input: string, context: Record<string, unknown> }`。路由先调用 `authenticate`，然后把已认证 `subject` 绑定到 session namespace，防止跨用户读取 context。远端工具结果 body 严格为 `{ output: unknown }`，只允许回填当前 session 尚未完成的 callId。HTTP 错误只返回 `{ code, requestId, message }`。
 
-- [ ] **Step 4: 运行 BFF 与根校验**
+- [x] **Step 4: 运行 BFF 与根校验**
 
 Run: `pnpm --filter @agent-kit/bff-hono typecheck && pnpm --filter @agent-kit/bff-hono test && pnpm typecheck && pnpm test && pnpm build`
 
 Expected: PASS，未授权、工具挂起、工具结果回填、跨 session callId 与敏感字段响应均被覆盖。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bff-hono examples/browser-extension-bff
@@ -269,32 +269,32 @@ git commit -m "feat(bff): expose authenticated agent harness"
 - Consumes：四个 package 的公开 API。
 - Produces：dataAnalyzeProject Worker 接入示例与 BOOS 浏览器扩展+BFF 接入示例。
 
-- [ ] **Step 1: 写入文档验收清单**
+- [x] **Step 1: 写入文档验收清单**
 
 ```markdown
-- [ ] Cloudflare 示例未向前端暴露 `LLM_API_KEY`
-- [ ] BFF 示例未在扩展配置中出现 Endpoint、模型或 API Key
-- [ ] SQLite 示例要求设置 `AGENT_KIT_MASTER_KEY`
-- [ ] 工具示例声明 `execution: 'remote'`
+- [x] Cloudflare 示例未向前端暴露 `LLM_API_KEY`
+- [x] BFF 示例未在扩展配置中出现 Endpoint、模型或 API Key
+- [x] SQLite 示例要求设置 `AGENT_KIT_MASTER_KEY`
+- [x] 工具示例声明 `execution: 'remote'`
 ```
 
-- [ ] **Step 2: 检查验收清单初始失败**
+- [x] **Step 2: 检查验收清单初始失败**
 
 Run: `rg -n 'LLM_API_KEY|AGENT_KIT_MASTER_KEY|execution' README.md docs/integrations docs/security.md`
 
 Expected: FAIL，文档尚不存在。
 
-- [ ] **Step 3: 编写最小接入文档**
+- [x] **Step 3: 编写最小接入文档**
 
 Cloudflare 文档展示 Worker `env` Binding、D1 migration 和 `createCloudflareAgentRuntime`。BFF 文档展示仅在 BFF 环境设置主密钥、SQLite 初始化、扩展调用 BFF 以及远端工具白名单。安全文档写明轮换 API Key 与主密钥的步骤，以及禁止记录的字段。
 
-- [ ] **Step 4: 运行文档和完整验证**
+- [x] **Step 4: 运行文档和完整验证**
 
 Run: `rg -n 'localStorage|llmApiKey|Authorization: Bearer' docs README.md examples || true && pnpm typecheck && pnpm test && pnpm build`
 
 Expected: PASS；文档不得建议浏览器保存 API Key，完整 workspace 校验通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md docs examples
