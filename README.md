@@ -18,3 +18,22 @@ Cloudflare 项目由 Worker Secret Binding 提供 Key、Base URL、模型；sess
 ## 浏览器 Tool Host
 
 插件调用 `POST /v1/agent/sessions/:sessionId/run`。若响应为 `pending_tool_call`，插件只能执行已注册白名单工具，并调用 `POST /v1/agent/sessions/:sessionId/tool-results/:callId` 回填结果；BFF 负责鉴权并将用户主体传入 harness。
+
+## 接入文档
+
+- [Cloudflare Worker 接入](docs/integrations/cloudflare-worker.md)
+- [浏览器扩展 + BFF 接入](docs/integrations/browser-extension-bff.md)
+- [安全说明](docs/security.md)
+
+## 验收清单
+
+- [x] Cloudflare 示例未向前端暴露 `LLM_API_KEY`
+- [x] BFF 示例未在扩展配置中出现 Endpoint、模型或 API Key
+- [x] SQLite 示例要求设置 `AGENT_KIT_MASTER_KEY`
+- [x] 工具示例声明 `execution: 'remote'`
+
+## 命令
+
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
