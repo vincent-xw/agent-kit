@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createCloudflareSecretProvider, createD1SessionStore } from './index.js'
+import { createCloudflareAgentRuntime, createCloudflareSecretProvider, createD1SessionStore } from './index.js'
 
 describe('Cloudflare SecretProvider', () => {
   it('缺少显式 API Key Binding 时拒绝读取配置', async () => {
@@ -25,5 +25,22 @@ describe('Cloudflare SecretProvider', () => {
     const store = createD1SessionStore(database)
     await store.save('s-1', [{ role: 'user', content: '你好' }])
     await expect(store.load('s-1')).resolves.toEqual([{ role: 'user', content: '你好' }])
+  })
+
+  it('Cloudflare runtime 在缺少 Binding 时返回 SECRET_NOT_CONFIGURED', async () => {
+    const database = {
+      prepare: (_sql: string) => ({
+        bind: (..._values: string[]) => ({
+          run: async () => undefined as unknown,
+          first: async () => null as { messages?: string | undefined } | null,
+        }),
+      }),
+    }
+    const runtime = createCloudflareAgentRuntime(
+      { LLM_API_KEY: '', LLM_BASE_URL: 'https://llm.example.test/v1', LLM_MODEL: 'test-model' },
+      { apiKeyBinding: 'LLM_API_KEY', baseUrlBinding: 'LLM_BASE_URL', modelBinding: 'LLM_MODEL', database },
+    )
+
+    await expect(runtime.secrets.get()).rejects.toMatchObject({ code: 'SECRET_NOT_CONFIGURED' })
   })
 })
