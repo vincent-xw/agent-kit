@@ -6,7 +6,7 @@ describe('ContextManager', () => {
   it('保存与追加消息', () => {
     const manager = createContextManager({ maxMessages: 5 })
     manager.save('s-1', [{ role: 'user', content: '你好' }])
-    manager.append('s-1', { role: 'tool', content: { ok: true } })
+    manager.append('s-1', { role: 'tool', content: { ok: true }, callId: 'call-1' })
     expect(manager.load('s-1')).toHaveLength(2)
   })
 

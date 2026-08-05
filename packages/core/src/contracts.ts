@@ -1,18 +1,27 @@
 import type { z } from 'zod'
 
-/** 模型输出的工具调用。 */
-export type ToolCall = { type: 'tool_call'; callId: string; toolName: string; input: unknown }
+/** 模型输出的单个工具调用。callId 用于回填时关联，并作为 OpenAI 的 tool_call_id 回传。 */
+export type ToolCall = { callId: string; toolName: string; input: unknown }
 
-/** LLM 单次完成的输出：最终文本或工具调用。 */
-export type LlmResult = { type: 'final'; output: unknown } | ToolCall
+/**
+ * LLM 单次完成的输出：最终文本，或本轮全部工具调用。
+ * 复数形态是必需的——模型可以在一轮内发起多个调用，只取第一个会静默丢弃其余调用。
+ */
+export type LlmResult = { type: 'final'; output: unknown } | { type: 'tool_calls'; calls: ToolCall[] }
 
-/** Harness 对外结果：最终输出、工具调用或需要远端 Tool Host 执行的挂起调用。 */
+/** Harness 对外结果：最终输出，或需要远端 Tool Host 执行的挂起调用集合。 */
 export type HarnessResult =
-  | LlmResult
-  | { type: 'pending_tool_call'; callId: string; toolName: string; input: unknown }
+  | { type: 'final'; output: unknown }
+  | { type: 'pending_tool_calls'; calls: Array<{ callId: string; toolName: string; input: unknown }> }
 
-/** 会话消息：用户输入与工具结果，工具结果 content 为校验后的结构化输出。 */
-export type SessionMessage = { role: 'user' | 'tool'; content: unknown }
+/**
+ * 会话消息。assistant 角色是必需的：缺少它模型看不到自己的上一轮输出与已发起的工具调用，
+ * 多轮对话实际不成立。toolCalls 仅在 assistant 消息上出现；callId 仅在 tool 消息上出现。
+ */
+export type SessionMessage =
+  | { role: 'user'; content: unknown }
+  | { role: 'assistant'; content: unknown; toolCalls?: ToolCall[] }
+  | { role: 'tool'; content: unknown; callId: string; toolName?: string }
 
 /** LLM 密钥配置，适配器从受信任来源读取后注入。 */
 export interface LlmSecret {
@@ -32,6 +41,22 @@ export interface SessionStore {
   save(sessionId: string, messages: SessionMessage[]): void | Promise<void>
 }
 
+/** 挂起的远端工具调用记录，用于 resume 时校验 callId 归属。 */
+export interface PendingCall {
+  sessionId: string
+  toolName: string
+}
+
+/**
+ * 挂起调用存储。抽成接口是因为进程内 Map 在两种场景都会丢：
+ * BFF 进程重启，以及 MV3 Service Worker 空闲挂起。宿主可注入持久化实现。
+ */
+export interface PendingCallStore {
+  get(callId: string): PendingCall | undefined | Promise<PendingCall | undefined>
+  set(callId: string, call: PendingCall): void | Promise<void>
+  delete(callId: string): void | Promise<void>
+}
+
 /** 审计事件只含非敏感字段：requestId、模型、耗时、HTTP 状态、工具名与错误码。 */
 export interface AuditEvent {
   requestId: string
@@ -47,11 +72,27 @@ export interface AuditLogger {
   log(event: AuditEvent): void | Promise<void>
 }
 
+/** 工具执行上下文：透传取消信号，使长时间运行的工具可被中止。 */
+export interface ToolExecutionContext {
+  signal: AbortSignal
+}
+
 /** 工具定义：Zod 输入/输出 Schema 与执行方式（服务端或远端 Tool Host）。 */
 export interface ToolDefinition<I = unknown, O = unknown> {
   name: string
   execution: 'server' | 'remote'
+  /** 供模型理解用途的说明，会随 JSON Schema 一并发给模型。 */
+  description?: string
   input: z.ZodType<I>
   output: z.ZodType<O>
-  execute?: (input: I) => Promise<O>
+  /** 单次执行超时毫秒数；未设置时使用 harness 的默认值。 */
+  timeoutMs?: number
+  execute?: (input: I, context: ToolExecutionContext) => Promise<O>
+}
+
+/** 发送给模型的工具声明，input schema 已转换为 JSON Schema。 */
+export interface ToolSchema {
+  name: string
+  description?: string
+  parameters: Record<string, unknown>
 }

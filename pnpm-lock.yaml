@@ -41,6 +41,10 @@ importers:
       '@agent-kit/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      zod:
+        specifier: 3.24.4
+        version: 3.24.4
 
   packages/bff-hono:
     dependencies:

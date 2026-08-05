@@ -1,12 +1,23 @@
 import type { z } from 'zod'
 
 import { AgentKitError } from './errors.js'
-import type { AuditLogger, HarnessResult, SessionMessage, SessionStore } from './contracts.js'
+import { toToolSchemas } from './json-schema.js'
+import type {
+  AuditLogger,
+  HarnessResult,
+  PendingCall,
+  PendingCallStore,
+  SessionMessage,
+  SessionStore,
+  ToolCall,
+  ToolDefinition,
+} from './contracts.js'
+import type { ContextManager } from './context-manager.js'
 import type { LlmClient } from './llm-client.js'
 import type { PromptRegistry } from './prompt-registry.js'
 import type { ToolRegistry } from './tool-registry.js'
 
-/** harness 依赖：LLM 客户端、会话存储、工具注册表与可选的提示词/审计。 */
+/** harness 依赖：LLM 客户端、会话存储、工具注册表与可选的提示词/审计/上下文/挂起存储。 */
 export interface AgentHarnessDependencies {
   llm: LlmClient
   sessions: SessionStore
@@ -14,6 +25,12 @@ export interface AgentHarnessDependencies {
   maxSteps: number
   prompts?: PromptRegistry
   audit?: AuditLogger
+  /** 上下文管理器：提供历史裁剪。未注入时发送完整历史。 */
+  context?: ContextManager
+  /** 挂起调用存储。未注入时使用进程内实现（进程重启即丢）。 */
+  pendingCalls?: PendingCallStore
+  /** 服务端工具的默认执行超时毫秒数，默认 30 秒。 */
+  toolTimeoutMs?: number
 }
 
 /** 最大步数受限的 模型 -> 工具调用 -> 工具结果 -> 模型 循环。 */
@@ -23,9 +40,6 @@ export interface AgentHarness {
   resume(request: { sessionId: string; callId: string; output: unknown }): Promise<HarnessResult>
 }
 
-/** 挂起的远端工具调用记录，用于 resume 时校验 callId 归属。 */
-type PendingCall = { sessionId: string; toolName: string }
-
 /** 校验 Zod Schema，失败时统一抛出带稳定错误码的 AgentKitError。 */
 function parseWithCode(schema: z.ZodType, value: unknown, code: 'TOOL_INPUT_INVALID' | 'TOOL_OUTPUT_INVALID'): unknown {
   const parsed = schema.safeParse(value)
@@ -33,12 +47,74 @@ function parseWithCode(schema: z.ZodType, value: unknown, code: 'TOOL_INPUT_INVA
   return parsed.data
 }
 
+/** 进程内挂起调用存储；宿主可注入持久化实现替换。 */
+function createMemoryPendingCallStore(): PendingCallStore {
+  const calls = new Map<string, PendingCall>()
+  return {
+    get: (callId) => calls.get(callId),
+    set: (callId, call) => void calls.set(callId, call),
+    delete: (callId) => void calls.delete(callId),
+  }
+}
+
+/**
+ * 在超时约束下执行服务端工具。
+ * 没有超时的话，一个挂住的工具会永久挂住整个 harness 循环——调用方连失败都收不到。
+ */
+async function executeWithTimeout(tool: ToolDefinition, input: unknown, timeoutMs: number): Promise<unknown> {
+  if (!tool.execute) throw new AgentKitError('TOOL_EXECUTOR_MISSING', `服务端工具缺少执行器：${tool.name}`)
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    return await tool.execute(input, { signal: controller.signal })
+  } catch (error) {
+    if (timedOut) {
+      throw new AgentKitError('TOOL_EXECUTION_TIMEOUT', `工具执行超时：${tool.name}`, { cause: error })
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** 执行受最大步数约束的模型与工具循环。 */
 export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness {
-  const pendingCalls = new Map<string, PendingCall>()
+  const pendingCalls = deps.pendingCalls ?? createMemoryPendingCallStore()
+  const toolTimeoutMs = deps.toolTimeoutMs ?? 30_000
 
-  function systemPrompt(): string | undefined {
-    return deps.prompts?.getDefault()?.prompt
+  function defaultPrompt() {
+    return deps.prompts?.getDefault()
+  }
+
+  /** 应用上下文裁剪；未注入 ContextManager 时发送完整历史。 */
+  function trimHistory(sessionId: string, history: SessionMessage[]): SessionMessage[] {
+    if (!deps.context) return history
+    deps.context.save(sessionId, history)
+    return deps.context.load(sessionId)
+  }
+
+  /** 校验模型最终输出是否符合 prompt 声明的输出协议。 */
+  function applyOutputProtocol(output: unknown): unknown {
+    const protocol = defaultPrompt()?.protocol
+    if (!protocol) return output
+    // 声明了 JSON 协议时模型返回的是 JSON 文本，先解析再校验。
+    let candidate = output
+    if (typeof output === 'string') {
+      try {
+        candidate = JSON.parse(output)
+      } catch {
+        throw new AgentKitError('LLM_OUTPUT_PROTOCOL_INVALID', '模型输出不是有效 JSON，不符合已声明的输出协议')
+      }
+    }
+    const parsed = protocol.safeParse(candidate)
+    if (!parsed.success) {
+      throw new AgentKitError('LLM_OUTPUT_PROTOCOL_INVALID', '模型输出不符合已声明的输出协议')
+    }
+    return parsed.data
   }
 
   async function runLoop(
@@ -48,32 +124,85 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
     history: SessionMessage[],
   ): Promise<HarnessResult> {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
+    // 本次用户输入在首轮发出后即并入历史，避免后续轮次重复追加。
+    let pendingInput = input
     for (let step = 0; step < deps.maxSteps; step += 1) {
       const startedAt = Date.now()
-      const prompt = systemPrompt()
-      const result = await deps.llm.complete({ input, context, messages: history, ...(prompt ? { systemPrompt: prompt } : {}) })
+      const prompt = defaultPrompt()
+      const toolSchemas = toToolSchemas(deps.tools.list())
+      const result = await deps.llm.complete({
+        ...(pendingInput ? { input: pendingInput } : {}),
+        context,
+        messages: trimHistory(sessionId, history),
+        ...(prompt?.prompt ? { systemPrompt: prompt.prompt } : {}),
+        ...(toolSchemas.length > 0 ? { tools: toolSchemas } : {}),
+        ...(prompt?.protocol ? { responseFormatJson: true } : {}),
+      })
       await deps.audit?.log({ requestId, durationMs: Date.now() - startedAt })
+      if (pendingInput) {
+        history.push({ role: 'user', content: pendingInput })
+        pendingInput = ''
+      }
+
       if (result.type === 'final') {
-        // 最终输出前持久化完整对话，包含本次用户输入。
-        await deps.sessions.save(sessionId, [...history, { role: 'user', content: input }])
-        return result
+        const output = applyOutputProtocol(result.output)
+        history.push({ role: 'assistant', content: result.output })
+        await deps.sessions.save(sessionId, history)
+        return { type: 'final', output }
       }
-      const tool = deps.tools.get(result.toolName)
-      if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${result.toolName}`)
-      const parsedInput = parseWithCode(tool.input, result.input, 'TOOL_INPUT_INVALID')
-      if (tool.execution === 'remote') {
-        // 远端工具不在此运行时执行：记录挂起调用并保存历史，交由 Tool Host 回填。
-        pendingCalls.set(result.callId, { sessionId, toolName: result.toolName })
-        await deps.sessions.save(sessionId, [...history, { role: 'user', content: input }])
-        return { type: 'pending_tool_call', callId: result.callId, toolName: result.toolName, input: parsedInput }
+
+      // assistant 轮次必须入库：否则模型看不到自己发起过哪些调用，工具结果就成了无主消息。
+      history.push({ role: 'assistant', content: null, toolCalls: result.calls })
+
+      const remoteCalls: Array<{ callId: string; toolName: string; input: unknown }> = []
+      for (const call of result.calls) {
+        const tool = deps.tools.get(call.toolName)
+        if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${call.toolName}`)
+        const parsedInput = parseWithCode(tool.input, call.input, 'TOOL_INPUT_INVALID')
+        if (tool.execution === 'remote') {
+          await pendingCalls.set(call.callId, { sessionId, toolName: call.toolName })
+          remoteCalls.push({ callId: call.callId, toolName: call.toolName, input: parsedInput })
+          continue
+        }
+        // 单个工具的执行失败不中断整轮：把失败结果一并回传，让模型自己决定如何补救。
+        // 但 Schema 校验失败是契约违约（工具定义与模型输出不匹配），必须直接抛出而不是喂回模型。
+        let rawOutput: unknown
+        try {
+          rawOutput = await executeWithTimeout(tool, parsedInput, tool.timeoutMs ?? toolTimeoutMs)
+        } catch (error) {
+          const code = error instanceof AgentKitError ? error.code : 'TOOL_EXECUTION_ABORTED'
+          await deps.audit?.log({ requestId, durationMs: 0, toolName: call.toolName, errorCode: code })
+          history.push({
+            role: 'tool',
+            content: { ok: false, code, message: error instanceof Error ? error.message : '工具执行失败' },
+            callId: call.callId,
+            toolName: call.toolName,
+          })
+          continue
+        }
+        const parsedOutput = parseWithCode(tool.output, rawOutput, 'TOOL_OUTPUT_INVALID')
+        history.push({ role: 'tool', content: parsedOutput, callId: call.callId, toolName: call.toolName })
       }
-      if (!tool.execute) throw new AgentKitError('TOOL_EXECUTOR_MISSING', `服务端工具缺少执行器：${result.toolName}`)
-      const rawOutput = await tool.execute(parsedInput)
-      // 工具输出必须再次校验，避免未受控数据进入后续模型上下文。
-      const parsedOutput = parseWithCode(tool.output, rawOutput, 'TOOL_OUTPUT_INVALID')
-      history.push({ role: 'tool', content: parsedOutput })
+
+      // 本轮存在远端调用时整轮挂起：全部 callId 回填完毕后才继续。
+      if (remoteCalls.length > 0) {
+        await deps.sessions.save(sessionId, history)
+        return { type: 'pending_tool_calls', calls: remoteCalls }
+      }
     }
     throw new AgentKitError('HARNESS_STEP_LIMIT', `工具调用超过最大步数：${deps.maxSteps}`)
+  }
+
+  /** 判断本轮 assistant 发起的调用是否已全部回填。 */
+  function hasUnfilledCalls(history: SessionMessage[]): boolean {
+    const expected = new Set<string>()
+    for (const message of history) {
+      if (message.role === 'assistant' && message.toolCalls) {
+        for (const call of message.toolCalls) expected.add(call.callId)
+      }
+      if (message.role === 'tool') expected.delete(message.callId)
+    }
+    return expected.size > 0
   }
 
   return {
@@ -82,17 +211,38 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       return runLoop(request.sessionId, request.input, request.context, history)
     },
     async resume(request) {
-      const pending = pendingCalls.get(request.callId)
+      const pending = await pendingCalls.get(request.callId)
       if (!pending || pending.sessionId !== request.sessionId) {
         throw new AgentKitError('PENDING_CALL_NOT_FOUND', `未找到可回填的工具调用：${request.callId}`)
       }
       const tool = deps.tools.get(pending.toolName)
       if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${pending.toolName}`)
       const parsedOutput = parseWithCode(tool.output, request.output, 'TOOL_OUTPUT_INVALID')
-      pendingCalls.delete(request.callId)
-      const history: SessionMessage[] = [...(await deps.sessions.load(request.sessionId)), { role: 'tool' as const, content: parsedOutput }]
+      await pendingCalls.delete(request.callId)
+      const history: SessionMessage[] = [
+        ...(await deps.sessions.load(request.sessionId)),
+        { role: 'tool', content: parsedOutput, callId: request.callId, toolName: pending.toolName },
+      ]
+      // 同轮还有未回填的调用时不推进模型，只落库并回报剩余待办。
+      if (hasUnfilledCalls(history)) {
+        await deps.sessions.save(request.sessionId, history)
+        return { type: 'pending_tool_calls', calls: await remainingCalls(history) }
+      }
       // 回填后继续模型循环，无需再附加新的用户输入。
       return runLoop(request.sessionId, '', {}, history)
     },
+  }
+
+  /** 收集历史中尚未回填的远端调用，供 resume 回报。 */
+  async function remainingCalls(history: SessionMessage[]): Promise<Array<{ callId: string; toolName: string; input: unknown }>> {
+    const filled = new Set(history.filter((message) => message.role === 'tool').map((message) => (message as { callId: string }).callId))
+    const remaining: Array<{ callId: string; toolName: string; input: unknown }> = []
+    for (const message of history) {
+      if (message.role !== 'assistant' || !message.toolCalls) continue
+      for (const call of message.toolCalls) {
+        if (!filled.has(call.callId)) remaining.push({ callId: call.callId, toolName: call.toolName, input: call.input })
+      }
+    }
+    return remaining
   }
 }

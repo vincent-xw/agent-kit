@@ -1,7 +1,16 @@
 {
   "name": "@agent-kit/core",
   "version": "0.1.0",
-  "private": true,
+  "description": "Agent Kit 核心运行时：工具注册、受限 harness、JSON Schema 转换与稳定错误码。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xuewen/agent-kit.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -9,7 +18,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

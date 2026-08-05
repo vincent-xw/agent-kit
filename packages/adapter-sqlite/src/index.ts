@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { DatabaseSync } from 'node:sqlite'
 
 import { AgentKitError, createAgentHarness, createLlmClient, createToolRegistry } from '@agent-kit/core'
-import type { LlmSecret, SessionMessage } from '@agent-kit/core'
+import type { LlmSecret, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
 
 /** 由主密钥派生短密钥版本标识，轮换后旧密文无法通过版本校验。 */
 function deriveKeyVersion(masterKey: string): string {
@@ -74,17 +74,54 @@ export function createSqliteSessionStore(database: DatabaseSync) {
   }
 }
 
-/** 组装 core 所需依赖：密钥库、会话存储、工具注册表与 harness。 */
-export function createSqliteAgentRuntime(options: { database: DatabaseSync; masterKey: string; maxSteps?: number }) {
+/** SQLite 挂起调用表：进程重启后回填仍能关联，不依赖进程内存。 */
+export function createSqlitePendingCallStore(database: DatabaseSync): PendingCallStore {
+  database.exec(`CREATE TABLE IF NOT EXISTS agent_pending_calls (
+    call_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  )`)
+  return {
+    get(callId: string) {
+      const row = database.prepare('SELECT session_id, tool_name FROM agent_pending_calls WHERE call_id = ?').get(callId) as
+        | { session_id?: string; tool_name?: string }
+        | undefined
+      if (!row?.session_id || !row.tool_name) return undefined
+      return { sessionId: row.session_id, toolName: row.tool_name }
+    },
+    set(callId: string, call: PendingCall) {
+      database
+        .prepare('INSERT OR REPLACE INTO agent_pending_calls (call_id, session_id, tool_name) VALUES (?, ?, ?)')
+        .run(callId, call.sessionId, call.toolName)
+    },
+    delete(callId: string) {
+      database.prepare('DELETE FROM agent_pending_calls WHERE call_id = ?').run(callId)
+    },
+  }
+}
+
+/** 组装 core 所需依赖：密钥库、会话存储、挂起调用存储、工具注册表与 harness。 */
+export function createSqliteAgentRuntime(options: {
+  database: DatabaseSync
+  masterKey: string
+  maxSteps?: number
+  prompts?: PromptRegistry
+  toolTimeoutMs?: number
+}) {
   const secrets = createSqliteSecretProvider({ database: options.database, masterKey: options.masterKey })
   const sessions = createSqliteSessionStore(options.database)
+  const pendingCalls = createSqlitePendingCallStore(options.database)
   const tools = createToolRegistry()
   const harness = createAgentHarness({
     // 每次补全前从 SQLite 读取当前密钥，未配置或版本不匹配时由 SecretProvider 抛稳定错误码。
     llm: { complete: async (request) => createLlmClient(await secrets.get()).complete(request) },
     sessions,
     tools,
+    pendingCalls,
     maxSteps: options.maxSteps ?? 10,
+    ...(options.prompts ? { prompts: options.prompts } : {}),
+    ...(options.toolTimeoutMs === undefined ? {} : { toolTimeoutMs: options.toolTimeoutMs }),
   })
-  return { secrets, sessions, tools, harness, database: options.database }
+  return { secrets, sessions, tools, pendingCalls, harness, database: options.database }
 }

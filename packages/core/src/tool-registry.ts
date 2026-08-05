@@ -4,6 +4,8 @@ import type { ToolDefinition } from './contracts.js'
 export interface ToolRegistry {
   register(definition: ToolDefinition): void
   get(name: string): ToolDefinition | undefined
+  /** 枚举已注册工具，供构造发给模型的 tools 声明使用。 */
+  list(): ToolDefinition[]
 }
 
 /** 内存实现：同名工具后注册会覆盖先注册项，业务方应避免重名。 */
@@ -15,6 +17,9 @@ export function createToolRegistry(): ToolRegistry {
     },
     get(name) {
       return definitions.get(name)
+    },
+    list() {
+      return [...definitions.values()]
     },
   }
 }

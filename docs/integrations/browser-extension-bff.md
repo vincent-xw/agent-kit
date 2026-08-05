@@ -46,18 +46,27 @@ Content-Type: application/json
 
 ### 执行远端工具并回填
 
-若响应为 `pending_tool_call`，扩展只能执行已注册白名单中的工具，例如：
+若响应为 `pending_tool_calls`，扩展只能执行已注册白名单中的工具，例如：
 
 ```ts
 tools.register({
   name: 'browser.read_page',
   execution: 'remote',
+  description: '读取当前页面标题与正文摘要',
   input: z.object({ url: z.string() }),
   output: z.object({ title: z.string() }),
 })
 ```
 
-工具结果回填：
+`description` 会随 JSON Schema 一并发给模型，用于让模型理解工具用途。
+
+响应形态是复数，一轮可能包含多个调用：
+
+```json
+{ "type": "pending_tool_calls", "calls": [{ "callId": "call-1", "toolName": "browser.read_page", "input": {} }] }
+```
+
+工具结果按 `callId` 逐个回填：
 
 ```http
 POST /v1/agent/sessions/:sessionId/tool-results/:callId
@@ -67,7 +76,9 @@ Content-Type: application/json
 { "output": { "title": "页面标题" } }
 ```
 
-BFF 会把已认证主体绑定到 session namespace，跨用户、跨 session 的 `callId` 回填会被拒绝（`PENDING_CALL_NOT_FOUND`）。
+同轮内还有未回填的 `callId` 时，该接口继续返回剩余的 `pending_tool_calls` 且不推进模型；全部回填完毕后才返回 `final` 或下一轮的 `pending_tool_calls`。
+
+BFF 会把已认证主体绑定到 session namespace，跨用户、跨 session 的 `callId` 回填会被拒绝（`PENDING_CALL_NOT_FOUND`）。挂起调用由 `createSqlitePendingCallStore` 落库，BFF 进程重启后回填仍能关联。
 
 ## 4. 安全要点
 

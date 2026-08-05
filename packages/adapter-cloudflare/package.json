@@ -1,7 +1,16 @@
 {
   "name": "@agent-kit/adapter-cloudflare",
   "version": "0.1.0",
-  "private": true,
+  "description": "Agent Kit 的 Cloudflare 适配器：Worker Secret Binding 与 D1 会话存储。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xuewen/agent-kit.git",
+    "directory": "packages/adapter-cloudflare"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -9,7 +18,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
