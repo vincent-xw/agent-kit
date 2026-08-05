@@ -1,6 +1,10 @@
 import { defineWorkspace } from 'vitest/config'
 
-/** 将四个 workspace 包各自作为 vitest 项目运行，保证每个包独立收集与执行测试。 */
+/**
+ * 各 workspace 包与示例各自作为独立 vitest 项目运行。
+ * 示例必须纳入：BFF 装配与鉴权红线的测试都在 examples/browser-extension-bff 里。
+ */
 export default defineWorkspace([
   'packages/*',
+  'examples/*',
 ])

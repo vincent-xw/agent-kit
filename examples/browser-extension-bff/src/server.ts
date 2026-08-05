@@ -4,12 +4,32 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
+import { createPromptRegistry } from '@agent-kit/core'
+import type { LlmSecret } from '@agent-kit/core'
+
+import { browserAutomationPrompt, browserToolDefinitions, candidateAssessmentPrompt, candidateAssessmentProtocol } from './browser-tools.js'
 
 /** 装配浏览器扩展专属 BFF：SQLite 密钥库 + Bearer 鉴权 + harness HTTP 边界。 */
-export function createBrowserExtensionBff(options: { masterKey: string; apiToken: string; databasePath?: string }) {
+export function createBrowserExtensionBff(options: {
+  masterKey: string
+  apiToken: string
+  databasePath?: string
+  /** 模型配置。由 BFF 进程环境提供，扩展侧永远看不到这三个字段。 */
+  llm?: LlmSecret
+}) {
   // 主密钥只存在于 BFF 进程环境，绝不写入 SQLite，也绝不暴露给浏览器扩展。
   const database = new DatabaseSync(options.databasePath ?? 'agent-kit.sqlite')
-  const runtime = createSqliteAgentRuntime({ database, masterKey: options.masterKey })
+  const prompts = createPromptRegistry()
+  // 浏览器自动化提示词先注册，因此成为默认提示词——扩展的主要用途是驱动页面操作。
+  prompts.register({ name: 'browser-automation', version: '1', prompt: browserAutomationPrompt })
+  prompts.register({
+    name: 'candidate-assessment',
+    version: '1',
+    prompt: candidateAssessmentPrompt,
+    protocol: candidateAssessmentProtocol,
+  })
+  const runtime = createSqliteAgentRuntime({ database, masterKey: options.masterKey, prompts })
+  for (const tool of browserToolDefinitions) runtime.tools.register(tool)
   const app = createAgentBff({
     // 示例鉴权：Bearer Token 与 BFF_API_TOKEN 比对；生产环境请替换为真实会话体系。
     authenticate: async (request) => {
@@ -18,13 +38,21 @@ export function createBrowserExtensionBff(options: { masterKey: string; apiToken
     },
     harness: runtime.harness,
   })
-  return { app, runtime, database }
+  return { app, runtime, database, prompts, ready: seedSecret(runtime, options.llm) }
+}
+
+/** 把环境提供的模型配置写入加密密钥库；未提供时保留库中已有配置。 */
+async function seedSecret(runtime: { secrets: { put(secret: LlmSecret): Promise<void> } }, llm?: LlmSecret): Promise<void> {
+  if (!llm) return
+  await runtime.secrets.put(llm)
 }
 
 /** 用 Node 原生 http 启动 BFF，避免引入第三方服务器适配器。 */
-export function startServer(options: { masterKey: string; apiToken: string; port?: number }) {
-  const { app } = createBrowserExtensionBff(options)
+export function startServer(options: { masterKey: string; apiToken: string; port?: number; llm?: LlmSecret }) {
+  const { app, ready } = createBrowserExtensionBff(options)
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // 密钥写入是异步的；先等它完成再处理请求，避免首个请求撞上 SECRET_NOT_CONFIGURED。
+    await ready
     const headers = new Headers()
     for (const [key, value] of Object.entries(req.headers)) {
       if (typeof value === 'string') headers.set(key, value)
@@ -62,5 +90,13 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
     console.error('缺少环境变量：AGENT_KIT_MASTER_KEY（32 字节 base64url）与 BFF_API_TOKEN')
     process.exit(1)
   }
-  startServer({ masterKey, apiToken })
+  // 模型配置：默认指向火山方舟的 OpenAI 兼容端点。
+  const apiKey = process.env.LLM_API_KEY ?? ''
+  const baseUrl = process.env.LLM_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3'
+  const model = process.env.LLM_MODEL ?? ''
+  if (!apiKey || !model) {
+    console.error('缺少环境变量：LLM_API_KEY 与 LLM_MODEL（可选 LLM_BASE_URL，默认火山方舟）')
+    process.exit(1)
+  }
+  startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model } })
 }
