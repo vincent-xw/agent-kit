@@ -110,10 +110,10 @@ describe('LlmClient', () => {
       input: 'hi',
       context: {},
       messages: [],
-      tools: [{ name: 'browser.click', description: '点击', parameters: { type: 'object', properties: {} } }],
+      tools: [{ name: 'browser_click', description: '点击', parameters: { type: 'object', properties: {} } }],
     })
     expect(bodyOf(fetchMock).tools).toEqual([
-      { type: 'function', function: { name: 'browser.click', description: '点击', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'browser_click', description: '点击', parameters: { type: 'object', properties: {} } } },
     ])
   })
 

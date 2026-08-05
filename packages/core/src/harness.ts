@@ -5,6 +5,7 @@ import { toToolSchemas } from './json-schema.js'
 import type {
   AuditLogger,
   HarnessResult,
+  LlmResult,
   PendingCall,
   PendingCallStore,
   SessionMessage,
@@ -151,14 +152,25 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       const startedAt = Date.now()
       const prompt = resolvePrompt(promptName)
       const toolSchemas = toToolSchemas(deps.tools.list())
-      const result = await deps.llm.complete({
-        ...(pendingInput ? { input: pendingInput } : {}),
-        context,
-        messages: trimHistory(sessionId, history),
-        ...(prompt?.prompt ? { systemPrompt: prompt.prompt } : {}),
-        ...(toolSchemas.length > 0 ? { tools: toolSchemas } : {}),
-        ...(prompt?.protocol ? { responseFormatJson: true } : {}),
-      })
+      // LLM 调用失败时也要留一笔审计，否则服务端只看到请求进来、没有任何后续痕迹。
+      let result: LlmResult
+      try {
+        result = await deps.llm.complete({
+          ...(pendingInput ? { input: pendingInput } : {}),
+          context,
+          messages: trimHistory(sessionId, history),
+          ...(prompt?.prompt ? { systemPrompt: prompt.prompt } : {}),
+          ...(toolSchemas.length > 0 ? { tools: toolSchemas } : {}),
+          ...(prompt?.protocol ? { responseFormatJson: true } : {}),
+        })
+      } catch (error) {
+        await deps.audit?.log({
+          requestId,
+          durationMs: Date.now() - startedAt,
+          errorCode: error instanceof AgentKitError ? error.code : 'LLM_CALL_FAILED',
+        })
+        throw error
+      }
       await deps.audit?.log({ requestId, durationMs: Date.now() - startedAt })
       if (pendingInput) {
         history.push({ role: 'user', content: pendingInput })

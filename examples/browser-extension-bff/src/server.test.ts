@@ -110,16 +110,16 @@ describe('browser-extension-bff 运行协议', () => {
   })
 
   it('远端工具返回 pending_tool_calls 且不在服务端执行', async () => {
-    stubToolCall('browser.locate_element', { role: 'greetButton' })
+    stubToolCall('browser_locate_element', { role: 'greetButton' })
     const { app, database } = await bff()
     const payload = (await (await run(app, 's-1', '定位打招呼按钮')).json()) as { type: string; calls: Array<{ toolName: string; callId: string }> }
     expect(payload.type).toBe('pending_tool_calls')
-    expect(payload.calls[0]).toMatchObject({ toolName: 'browser.locate_element' })
+    expect(payload.calls[0]).toMatchObject({ toolName: 'browser_locate_element' })
     database.close()
   })
 
   it('工具结果回填后继续推进模型', async () => {
-    stubToolCall('browser.locate_element', { role: 'greetButton' })
+    stubToolCall('browser_locate_element', { role: 'greetButton' })
     const { app, database } = await bff()
     const pending = (await (await run(app, 's-1', '定位')).json()) as { calls: Array<{ callId: string }> }
     const callId = pending.calls[0]?.callId
@@ -134,7 +134,7 @@ describe('browser-extension-bff 运行协议', () => {
   })
 
   it('工具输出不符合 Schema 时回填被拒', async () => {
-    stubToolCall('browser.locate_element', { role: 'greetButton' })
+    stubToolCall('browser_locate_element', { role: 'greetButton' })
     const { app, database } = await bff()
     const pending = (await (await run(app, 's-1', '定位')).json()) as { calls: Array<{ callId: string }> }
     const response = await app.request(`/v1/agent/sessions/s-1/tool-results/${pending.calls[0]?.callId}`, {
@@ -147,7 +147,7 @@ describe('browser-extension-bff 运行协议', () => {
   })
 
   it('跨 session 回填被拒绝', async () => {
-    stubToolCall('browser.locate_element', { role: 'greetButton' })
+    stubToolCall('browser_locate_element', { role: 'greetButton' })
     const { app, database } = await bff()
     const pending = (await (await run(app, 's-1', '定位')).json()) as { calls: Array<{ callId: string }> }
     const response = await app.request(`/v1/agent/sessions/s-other/tool-results/${pending.calls[0]?.callId}`, {
@@ -205,15 +205,15 @@ describe('浏览器工具定义', () => {
 
   it('覆盖闭环所需的 9 个工具', () => {
     expect(browserToolDefinitions.map((tool) => tool.name)).toEqual([
-      'browser.snapshot',
-      'browser.read_page',
-      'browser.locate_element',
-      'browser.click',
-      'browser.input_text',
-      'browser.press_key',
-      'browser.scroll',
-      'browser.verify',
-      'browser.screenshot',
+      'browser_snapshot',
+      'browser_read_page',
+      'browser_locate_element',
+      'browser_click',
+      'browser_input_text',
+      'browser_press_key',
+      'browser_scroll',
+      'browser_verify',
+      'browser_screenshot',
     ])
   })
 
@@ -223,11 +223,11 @@ describe('浏览器工具定义', () => {
 
   it('snapshot 是第一个工具，引导模型先看清页面', () => {
     // 自由指令下模型若不先快照就会凭猜测写选择器，这是最主要的失败来源。
-    expect(browserToolDefinitions[0]?.name).toBe('browser.snapshot')
+    expect(browserToolDefinitions[0]?.name).toBe('browser_snapshot')
   })
 
   it('click 与 input_text 接受 ref，不强制传坐标', () => {
-    for (const name of ['browser.click', 'browser.input_text']) {
+    for (const name of ['browser_click', 'browser_input_text']) {
       const tool = browserToolDefinitions.find((item) => item.name === name)
       const schema = toToolSchema(tool!)
       const properties = (schema.parameters as { properties: Record<string, unknown> }).properties
@@ -240,7 +240,7 @@ describe('浏览器工具定义', () => {
   })
 
   it('locate_element 的 role 已改为可选，不再绑死 BOSS 角色枚举', () => {
-    const tool = browserToolDefinitions.find((item) => item.name === 'browser.locate_element')
+    const tool = browserToolDefinitions.find((item) => item.name === 'browser_locate_element')
     const required = (toToolSchema(tool!).parameters as { required?: string[] }).required ?? []
     expect(required).not.toContain('role')
   })
@@ -278,7 +278,7 @@ describe('提示词注册', () => {
   it('自由指令提示词交代先快照后动作', async () => {
     const { prompts, database } = await bff()
     const prompt = prompts.getByName('free-form')?.prompt ?? ''
-    expect(prompt).toContain('browser.snapshot')
+    expect(prompt).toContain('browser_snapshot')
     expect(prompt).toContain('ref')
     database.close()
   })

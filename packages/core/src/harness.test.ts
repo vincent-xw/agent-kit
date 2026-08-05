@@ -14,7 +14,7 @@ describe('AgentHarness', () => {
     const requests: unknown[] = []
     const tools = createToolRegistry()
     tools.register({
-      name: 'weather.read',
+      name: 'weather_read',
       execution: 'server',
       input: z.object({ city: z.string() }),
       output: z.object({ temperature: z.number() }),
@@ -25,7 +25,7 @@ describe('AgentHarness', () => {
         complete: async (request) => {
           requests.push(request)
           return requests.length === 1
-            ? callsOf({ callId: 'call-1', toolName: 'weather.read', input: { city: '上海' } })
+            ? callsOf({ callId: 'call-1', toolName: 'weather_read', input: { city: '上海' } })
             : { type: 'final', output: '上海 26 度' }
         },
       },
@@ -40,15 +40,15 @@ describe('AgentHarness', () => {
 
   it('远端工具返回待执行调用且不在服务端执行', async () => {
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-2', toolName: 'browser.read_page', input: {} }) },
+      llm: { complete: async () => callsOf({ callId: 'call-2', toolName: 'browser_read_page', input: {} }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
     await expect(harness.run({ sessionId: 's-2', input: '读取页面', context: {} })).resolves.toEqual({
       type: 'pending_tool_calls',
-      calls: [{ callId: 'call-2', toolName: 'browser.read_page', input: {} }],
+      calls: [{ callId: 'call-2', toolName: 'browser_read_page', input: {} }],
     })
   })
 
@@ -64,14 +64,14 @@ describe('AgentHarness', () => {
   it('工具输入不符合 Schema 返回 TOOL_INPUT_INVALID', async () => {
     const tools = createToolRegistry()
     tools.register({
-      name: 'weather.read',
+      name: 'weather_read',
       execution: 'server',
       input: z.object({ city: z.string() }),
       output: z.object({ temperature: z.number() }),
       execute: async () => ({ temperature: 26 }),
     })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-4', toolName: 'weather.read', input: { city: 123 } }) },
+      llm: { complete: async () => callsOf({ callId: 'call-4', toolName: 'weather_read', input: { city: 123 } }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
@@ -81,14 +81,14 @@ describe('AgentHarness', () => {
   it('工具输出不符合 Schema 返回 TOOL_OUTPUT_INVALID', async () => {
     const tools = createToolRegistry()
     tools.register({
-      name: 'weather.read',
+      name: 'weather_read',
       execution: 'server',
       input: z.object({}),
       output: z.object({ temperature: z.number() }),
       execute: async () => ({ temperature: 'hot' }),
     })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-5', toolName: 'weather.read', input: {} }) },
+      llm: { complete: async () => callsOf({ callId: 'call-5', toolName: 'weather_read', input: {} }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
@@ -98,14 +98,14 @@ describe('AgentHarness', () => {
   it('达到最大步数返回 HARNESS_STEP_LIMIT', async () => {
     const tools = createToolRegistry()
     tools.register({
-      name: 'loop.tick',
+      name: 'loop_tick',
       execution: 'server',
       input: z.object({}),
       output: z.object({ ok: z.boolean() }),
       execute: async () => ({ ok: true }),
     })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-6', toolName: 'loop.tick', input: {} }) },
+      llm: { complete: async () => callsOf({ callId: 'call-6', toolName: 'loop_tick', input: {} }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 2,
     })
 
@@ -115,13 +115,13 @@ describe('AgentHarness', () => {
   it('远端工具结果通过 resume 回填后进入下一次模型调用', async () => {
     const requests: unknown[] = []
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({ url: z.string() }), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({ url: z.string() }), output: z.object({ title: z.string() }) })
     const harness = createAgentHarness({
       llm: {
         complete: async (request) => {
           requests.push(request)
           return requests.length === 1
-            ? callsOf({ callId: 'call-7', toolName: 'browser.read_page', input: { url: 'https://example.test' } })
+            ? callsOf({ callId: 'call-7', toolName: 'browser_read_page', input: { url: 'https://example.test' } })
             : { type: 'final', output: '页面标题：首页' }
         },
       },
@@ -129,16 +129,16 @@ describe('AgentHarness', () => {
     })
 
     const pending = await harness.run({ sessionId: 's-7', input: '读取页面', context: {} })
-    expect(pending).toMatchObject({ type: 'pending_tool_calls', calls: [{ toolName: 'browser.read_page' }] })
+    expect(pending).toMatchObject({ type: 'pending_tool_calls', calls: [{ toolName: 'browser_read_page' }] })
     await expect(harness.resume({ sessionId: 's-7', callId: 'call-7', output: { title: '首页' } })).resolves.toEqual({ type: 'final', output: '页面标题：首页' })
     expect(requests).toHaveLength(2)
   })
 
   it('跨 session 回填被拒绝', async () => {
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-8', toolName: 'browser.read_page', input: {} }) },
+      llm: { complete: async () => callsOf({ callId: 'call-8', toolName: 'browser_read_page', input: {} }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
@@ -148,9 +148,9 @@ describe('AgentHarness', () => {
 
   it('resume 的工具输出不符合 Schema 返回 TOOL_OUTPUT_INVALID', async () => {
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-9', toolName: 'browser.read_page', input: {} }) },
+      llm: { complete: async () => callsOf({ callId: 'call-9', toolName: 'browser_read_page', input: {} }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
@@ -161,7 +161,7 @@ describe('AgentHarness', () => {
   it('把已注册工具的 JSON Schema 发给模型', async () => {
     const tools = createToolRegistry()
     tools.register({
-      name: 'browser.click',
+      name: 'browser_click',
       execution: 'remote',
       description: '在给定坐标执行真实点击',
       input: z.object({ x: z.number(), y: z.number(), label: z.string().optional() }),
@@ -181,7 +181,7 @@ describe('AgentHarness', () => {
     await harness.run({ sessionId: 's-10', input: '点击', context: {} })
     expect(seen).toEqual([
       {
-        name: 'browser.click',
+        name: 'browser_click',
         description: '在给定坐标执行真实点击',
         parameters: {
           type: 'object',
@@ -212,7 +212,7 @@ describe('AgentHarness', () => {
     const sessions = createMemorySessionStore()
     const tools = createToolRegistry()
     tools.register({
-      name: 'weather.read',
+      name: 'weather_read',
       execution: 'server',
       input: z.object({}),
       output: z.object({ temperature: z.number() }),
@@ -223,7 +223,7 @@ describe('AgentHarness', () => {
       llm: {
         complete: async () => {
           step += 1
-          return step === 1 ? callsOf({ callId: 'call-a', toolName: 'weather.read', input: {} }) : { type: 'final', output: '26 度' }
+          return step === 1 ? callsOf({ callId: 'call-a', toolName: 'weather_read', input: {} }) : { type: 'final', output: '26 度' }
         },
       },
       sessions, tools, maxSteps: 3,
@@ -232,14 +232,14 @@ describe('AgentHarness', () => {
     await harness.run({ sessionId: 's-12', input: '查天气', context: {} })
     const history = (await sessions.load('s-12')) as SessionMessage[]
     expect(history.map((message) => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
-    expect(history[1]).toMatchObject({ role: 'assistant', toolCalls: [{ callId: 'call-a', toolName: 'weather.read' }] })
+    expect(history[1]).toMatchObject({ role: 'assistant', toolCalls: [{ callId: 'call-a', toolName: 'weather_read' }] })
     expect(history[2]).toMatchObject({ role: 'tool', callId: 'call-a' })
   })
 
   it('模型看到自己的上一轮 assistant 输出', async () => {
     const tools = createToolRegistry()
     tools.register({
-      name: 'weather.read',
+      name: 'weather_read',
       execution: 'server',
       input: z.object({}),
       output: z.object({ temperature: z.number() }),
@@ -252,7 +252,7 @@ describe('AgentHarness', () => {
         complete: async (request) => {
           seenHistories.push([...request.messages])
           step += 1
-          return step === 1 ? callsOf({ callId: 'call-b', toolName: 'weather.read', input: {} }) : { type: 'final', output: '26 度' }
+          return step === 1 ? callsOf({ callId: 'call-b', toolName: 'weather_read', input: {} }) : { type: 'final', output: '26 度' }
         },
       },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
@@ -265,7 +265,7 @@ describe('AgentHarness', () => {
   it('一轮内多个工具调用全部执行', async () => {
     const executed: string[] = []
     const tools = createToolRegistry()
-    for (const name of ['a.run', 'b.run']) {
+    for (const name of ['a_run', 'b_run']) {
       tools.register({
         name,
         execution: 'server',
@@ -283,7 +283,7 @@ describe('AgentHarness', () => {
         complete: async () => {
           step += 1
           return step === 1
-            ? callsOf({ callId: 'c1', toolName: 'a.run', input: {} }, { callId: 'c2', toolName: 'b.run', input: {} })
+            ? callsOf({ callId: 'c1', toolName: 'a_run', input: {} }, { callId: 'c2', toolName: 'b_run', input: {} })
             : { type: 'final', output: 'done' }
         },
       },
@@ -291,20 +291,20 @@ describe('AgentHarness', () => {
     })
 
     await harness.run({ sessionId: 's-14', input: '并行', context: {} })
-    expect(executed).toEqual(['a.run', 'b.run'])
+    expect(executed).toEqual(['a_run', 'b_run'])
   })
 
   it('一轮内部分工具失败时失败与成功结果一并回传', async () => {
     const tools = createToolRegistry()
     tools.register({
-      name: 'ok.run',
+      name: 'ok_run',
       execution: 'server',
       input: z.object({}),
       output: z.object({ ok: z.boolean() }),
       execute: async () => ({ ok: true }),
     })
     tools.register({
-      name: 'bad.run',
+      name: 'bad_run',
       execution: 'server',
       input: z.object({}),
       output: z.object({ ok: z.boolean() }),
@@ -320,7 +320,7 @@ describe('AgentHarness', () => {
           seenHistories.push([...request.messages])
           step += 1
           return step === 1
-            ? callsOf({ callId: 'c1', toolName: 'ok.run', input: {} }, { callId: 'c2', toolName: 'bad.run', input: {} })
+            ? callsOf({ callId: 'c1', toolName: 'ok_run', input: {} }, { callId: 'c2', toolName: 'bad_run', input: {} })
             : { type: 'final', output: 'done' }
         },
       },
@@ -336,7 +336,7 @@ describe('AgentHarness', () => {
 
   it('多个远端调用需全部回填后才推进模型', async () => {
     const tools = createToolRegistry()
-    for (const name of ['r1.run', 'r2.run']) {
+    for (const name of ['r1_run', 'r2_run']) {
       tools.register({ name, execution: 'remote', input: z.object({}), output: z.object({ ok: z.boolean() }) })
     }
     let step = 0
@@ -345,7 +345,7 @@ describe('AgentHarness', () => {
         complete: async () => {
           step += 1
           return step === 1
-            ? callsOf({ callId: 'c1', toolName: 'r1.run', input: {} }, { callId: 'c2', toolName: 'r2.run', input: {} })
+            ? callsOf({ callId: 'c1', toolName: 'r1_run', input: {} }, { callId: 'c2', toolName: 'r2_run', input: {} })
             : { type: 'final', output: 'done' }
         },
       },
@@ -369,7 +369,7 @@ describe('AgentHarness', () => {
     try {
       const tools = createToolRegistry()
       tools.register({
-        name: 'slow.run',
+        name: 'slow_run',
         execution: 'server',
         input: z.object({}),
         output: z.object({ ok: z.boolean() }),
@@ -386,7 +386,7 @@ describe('AgentHarness', () => {
           complete: async (request) => {
             seenHistories.push([...request.messages])
             step += 1
-            return step === 1 ? callsOf({ callId: 'c1', toolName: 'slow.run', input: {} }) : { type: 'final', output: 'done' }
+            return step === 1 ? callsOf({ callId: 'c1', toolName: 'slow_run', input: {} }) : { type: 'final', output: 'done' }
           },
         },
         sessions: createMemorySessionStore(), tools, maxSteps: 3,
@@ -410,14 +410,14 @@ describe('AgentHarness', () => {
       delete: (callId) => void store.delete(callId),
     }
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-x', toolName: 'browser.read_page', input: {} }) },
+      llm: { complete: async () => callsOf({ callId: 'call-x', toolName: 'browser_read_page', input: {} }) },
       sessions: createMemorySessionStore(), tools, maxSteps: 3, pendingCalls,
     })
 
     await harness.run({ sessionId: 's-18', input: '读取', context: {} })
-    expect(store.get('call-x')).toEqual({ sessionId: 's-18', toolName: 'browser.read_page' })
+    expect(store.get('call-x')).toEqual({ sessionId: 's-18', toolName: 'browser_read_page' })
   })
 
   it('注入的挂起存储使新 harness 实例也能回填', async () => {
@@ -429,10 +429,10 @@ describe('AgentHarness', () => {
     }
     const sessions = createMemorySessionStore()
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     const deps = { sessions, tools, maxSteps: 3, pendingCalls }
 
-    const first = createAgentHarness({ ...deps, llm: { complete: async () => callsOf({ callId: 'call-y', toolName: 'browser.read_page', input: {} }) } })
+    const first = createAgentHarness({ ...deps, llm: { complete: async () => callsOf({ callId: 'call-y', toolName: 'browser_read_page', input: {} }) } })
     await first.run({ sessionId: 's-19', input: '读取', context: {} })
 
     // 模拟进程重启：换一个 harness 实例，挂起调用仍能通过注入存储找回。
@@ -637,14 +637,14 @@ describe('按名选择提示词', () => {
     // 否则一次工具循环的前后两半会用不同提示词（甚至不同输出协议）。
     const prompts = twoPrompts()
     const tools = createToolRegistry()
-    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     const seenPrompts: Array<string | undefined> = []
     const harness = createAgentHarness({
       llm: {
         complete: async (request) => {
           seenPrompts.push(request.systemPrompt)
           return seenPrompts.length === 1
-            ? { type: 'tool_calls', calls: [{ callId: 'c1', toolName: 'browser.read_page', input: {} }] }
+            ? { type: 'tool_calls', calls: [{ callId: 'c1', toolName: 'browser_read_page', input: {} }] }
             : { type: 'final', output: JSON.stringify({ decisions: [] }) }
         },
       },

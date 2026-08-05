@@ -85,8 +85,22 @@ function convertObject(schema: z.ZodObject<z.ZodRawShape>, toolName: string, pat
   return { type: 'object', properties, ...(required.length > 0 ? { required } : {}) }
 }
 
+/**
+ * OpenAI 兼容端点对函数名的约束：只允许字母、数字、下划线与连字符。
+ * 点号会被拒绝（`Invalid 'tools[0].function.name': string does not match pattern`），
+ * 而错误发生在请求端而非注册时，症状是「所有请求都 400」，很难定位到是命名问题。
+ * 所以在转换时就挡住。
+ */
+const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/
+
 /** 把工具的输入 Schema 转换为可发给模型的 JSON Schema 声明。 */
 export function toToolSchema(tool: ToolDefinition): ToolSchema {
+  if (!TOOL_NAME_PATTERN.test(tool.name)) {
+    throw new AgentKitError(
+      'TOOL_SCHEMA_UNSUPPORTED',
+      `工具名 ${tool.name} 不合法：OpenAI 兼容端点只接受字母、数字、下划线与连字符（^[a-zA-Z0-9_-]+$），不能含点号等字符。`,
+    )
+  }
   const parameters = convert(tool.input as z.ZodTypeAny, tool.name, '')
   // 顶层必须是 object：OpenAI 的 function parameters 只接受对象形态。
   if (parameters.type !== 'object') {

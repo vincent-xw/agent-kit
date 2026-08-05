@@ -24,7 +24,7 @@ describe('Agent BFF', () => {
       body: JSON.stringify({ input: '读取页面', context: {} }),
     })
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ type: 'pending_tool_calls', calls: [{ toolName: 'browser.read_page' }] })
+    await expect(response.json()).resolves.toMatchObject({ type: 'pending_tool_calls', calls: [{ toolName: 'browser_read_page' }] })
   })
 
   it('远端工具结果回填后继续 harness', async () => {
@@ -94,7 +94,7 @@ function createHarness(options?: { onRun?: (sessionId: string) => void; failWith
       if (options?.failWithSecret) throw new AgentKitError('SECRET_NOT_CONFIGURED', '密钥未配置')
       if (request.input === '读取页面') {
         pending.set('call-1', request.sessionId)
-        return { type: 'pending_tool_calls', calls: [{ callId: 'call-1', toolName: 'browser.read_page', input: {} }] }
+        return { type: 'pending_tool_calls', calls: [{ callId: 'call-1', toolName: 'browser_read_page', input: {} }] }
       }
       return { type: 'final', output: 'ok' }
     },

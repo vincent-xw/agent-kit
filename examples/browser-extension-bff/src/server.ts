@@ -4,8 +4,8 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
-import { createPromptRegistry } from '@agent-kit/core'
-import type { LlmSecret } from '@agent-kit/core'
+import { createConsoleAuditLogger, createPromptRegistry } from '@agent-kit/core'
+import type { AuditLogger, LlmSecret } from '@agent-kit/core'
 
 import {
   browserAutomationPrompt,
@@ -22,9 +22,13 @@ export function createBrowserExtensionBff(options: {
   databasePath?: string
   /** 模型配置。由 BFF 进程环境提供，扩展侧永远看不到这三个字段。 */
   llm?: LlmSecret
+  /** 审计日志。省略时使用控制台实现。传 undefined 之外的值可替换或静音。 */
+  audit?: AuditLogger
 }) {
   // 主密钥只存在于 BFF 进程环境，绝不写入 SQLite，也绝不暴露给浏览器扩展。
   const database = new DatabaseSync(options.databasePath ?? 'agent-kit.sqlite')
+  // 审计日志：默认开启。不注入的话服务端对失败完全没有可观测性。
+  const audit = options.audit ?? createConsoleAuditLogger({ prefix: '[bff]' })
   const prompts = createPromptRegistry()
   // free-form 先注册因此成为默认提示词：调试期的主用途是用户下自由指令。
   // 另两个按名选择（harness.run 的 promptName）。
@@ -36,7 +40,7 @@ export function createBrowserExtensionBff(options: {
     prompt: candidateAssessmentPrompt,
     protocol: candidateAssessmentProtocol,
   })
-  const runtime = createSqliteAgentRuntime({ database, masterKey: options.masterKey, prompts })
+  const runtime = createSqliteAgentRuntime({ database, masterKey: options.masterKey, prompts, audit })
   for (const tool of browserToolDefinitions) runtime.tools.register(tool)
   const app = createAgentBff({
     // 示例鉴权：Bearer Token 与 BFF_API_TOKEN 比对；生产环境请替换为真实会话体系。
@@ -45,6 +49,7 @@ export function createBrowserExtensionBff(options: {
       return token && token === options.apiToken ? { subject: 'browser-extension' } : null
     },
     harness: runtime.harness,
+    audit,
   })
   return { app, runtime, database, prompts, ready: seedSecret(runtime, options.llm) }
 }

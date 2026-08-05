@@ -59,9 +59,9 @@ describe('SQLite SecretProvider', () => {
   it('挂起调用落库，进程重启后仍可回填', async () => {
     const database = new DatabaseSync(':memory:')
     const store = createSqlitePendingCallStore(database)
-    store.set('call-1', { sessionId: 's-1', toolName: 'browser.click' })
+    store.set('call-1', { sessionId: 's-1', toolName: 'browser_click' })
     // 换一个 store 实例模拟进程重启：状态在 SQLite 里，不在进程内存里。
-    expect(createSqlitePendingCallStore(database).get('call-1')).toEqual({ sessionId: 's-1', toolName: 'browser.click' })
+    expect(createSqlitePendingCallStore(database).get('call-1')).toEqual({ sessionId: 's-1', toolName: 'browser_click' })
     store.delete('call-1')
     expect(store.get('call-1')).toBeUndefined()
   })
@@ -70,10 +70,10 @@ describe('SQLite SecretProvider', () => {
     // 不存的话 BFF 重启后 resume 会回退到默认提示词，一次工具循环的前后两半用上不同协议。
     const database = new DatabaseSync(':memory:')
     const store = createSqlitePendingCallStore(database)
-    store.set('call-2', { sessionId: 's-1', toolName: 'browser.click', promptName: 'candidate-assessment' })
+    store.set('call-2', { sessionId: 's-1', toolName: 'browser_click', promptName: 'candidate-assessment' })
     expect(createSqlitePendingCallStore(database).get('call-2')).toEqual({
       sessionId: 's-1',
-      toolName: 'browser.click',
+      toolName: 'browser_click',
       promptName: 'candidate-assessment',
     })
   })
@@ -82,20 +82,20 @@ describe('SQLite SecretProvider', () => {
     const database = new DatabaseSync(':memory:')
     const first = createSqliteAgentRuntime({ database, masterKey: validMasterKey, maxSteps: 3 })
     await first.secrets.put({ apiKey: 'sk-test-value', baseUrl: 'https://llm.example.test/v1', model: 'test' })
-    first.tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    first.tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
         ok: true,
         status: 200,
-        json: async () => ({ choices: [{ message: { tool_calls: [{ id: 'call-r', function: { name: 'browser.read_page', arguments: '{}' } }] } }] }),
+        json: async () => ({ choices: [{ message: { tool_calls: [{ id: 'call-r', function: { name: 'browser_read_page', arguments: '{}' } }] } }] }),
       })),
     )
     await expect(first.harness.run({ sessionId: 's-2', input: '读取', context: {} })).resolves.toMatchObject({ type: 'pending_tool_calls' })
 
     // 同一个数据库、新的 runtime：挂起调用与会话都从 SQLite 恢复。
     const second = createSqliteAgentRuntime({ database, masterKey: validMasterKey, maxSteps: 3 })
-    second.tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    second.tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '首页' } }] }) })))
     await expect(second.harness.resume({ sessionId: 's-2', callId: 'call-r', output: { title: '首页' } })).resolves.toEqual({ type: 'final', output: '首页' })
   })

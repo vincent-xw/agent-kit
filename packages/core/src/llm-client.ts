@@ -115,6 +115,36 @@ function extractResult(payload: unknown): LlmResult | null {
   return { type: 'final', output: typeof message.content === 'string' ? message.content : '' }
 }
 
+/**
+ * 提取端点错误正文里的可读原因。
+ *
+ * OpenAI 兼容端点的错误形如 { error: { message, code, type } }，但各家不完全一致，
+ * 所以逐层降级：结构化 message → code → 原始文本截断。
+ * 只取错误描述，不回显整个正文 —— 那里可能带上请求回显。
+ */
+async function readErrorDetail(response: { text(): Promise<string> }): Promise<string> {
+  let raw: string
+  try {
+    raw = await response.text()
+  } catch {
+    return ''
+  }
+  if (!raw.trim()) return ''
+  try {
+    const payload = JSON.parse(raw) as { error?: { message?: unknown; code?: unknown; type?: unknown }; message?: unknown }
+    const nested = payload.error
+    if (nested) {
+      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message.trim()
+      if (typeof nested.code === 'string' && nested.code.trim()) return `code=${nested.code}`
+      if (typeof nested.type === 'string' && nested.type.trim()) return `type=${nested.type}`
+    }
+    if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim()
+  } catch {
+    // 不是 JSON，退回原始文本。
+  }
+  return raw.length > 300 ? `${raw.slice(0, 300)}…` : raw
+}
+
 /** 创建 OpenAI Chat Completions 兼容 HTTP 客户端，统一错误标准化为 AgentKitError。 */
 export function createLlmClient(config: LlmClientConfig): LlmClient {
   const timeoutMs = config.timeoutMs ?? 30_000
@@ -124,7 +154,7 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
       try {
-        let response: { ok: boolean; status: number; json(): Promise<unknown> }
+        let response: { ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }
         try {
           response = await fetch(endpoint, {
             method: 'POST',
@@ -148,7 +178,13 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
           throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
         }
         if (!response.ok) {
-          throw new AgentKitError('LLM_RESPONSE_INVALID', `LLM 返回 HTTP ${response.status}`)
+          // 端点的错误正文才是唯一能说明「为什么 400」的信息（模型名不对、
+          // tools 结构不合法、上下文超长…）。丢掉它就只剩一个无从下手的状态码。
+          const detail = await readErrorDetail(response)
+          throw new AgentKitError(
+            'LLM_RESPONSE_INVALID',
+            `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`,
+          )
         }
         let payload: unknown
         try {

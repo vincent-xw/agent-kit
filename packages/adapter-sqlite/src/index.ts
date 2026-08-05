@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { DatabaseSync } from 'node:sqlite'
 
 import { AgentKitError, createAgentHarness, createLlmClient, createToolRegistry } from '@agent-kit/core'
-import type { LlmSecret, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
+import type { AuditLogger, LlmSecret, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
 
 /** 由主密钥派生短密钥版本标识，轮换后旧密文无法通过版本校验。 */
 function deriveKeyVersion(masterKey: string): string {
@@ -119,6 +119,7 @@ export function createSqliteAgentRuntime(options: {
   maxSteps?: number
   prompts?: PromptRegistry
   toolTimeoutMs?: number
+  audit?: AuditLogger
 }) {
   const secrets = createSqliteSecretProvider({ database: options.database, masterKey: options.masterKey })
   const sessions = createSqliteSessionStore(options.database)
@@ -132,6 +133,7 @@ export function createSqliteAgentRuntime(options: {
     pendingCalls,
     maxSteps: options.maxSteps ?? 10,
     ...(options.prompts ? { prompts: options.prompts } : {}),
+    ...(options.audit ? { audit: options.audit } : {}),
     ...(options.toolTimeoutMs === undefined ? {} : { toolTimeoutMs: options.toolTimeoutMs }),
   })
   return { secrets, sessions, tools, pendingCalls, harness, database: options.database }

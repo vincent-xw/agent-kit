@@ -6,7 +6,7 @@ import type { SessionMessage } from './index.js'
 /** 构造一次工具往返：assistant 发起调用 + 对应的 tool 结果。 */
 function toolRound(callId: string): SessionMessage[] {
   return [
-    { role: 'assistant', content: null, toolCalls: [{ callId, toolName: 'browser.click', input: {} }] },
+    { role: 'assistant', content: null, toolCalls: [{ callId, toolName: 'browser_click', input: {} }] },
     { role: 'tool', content: { ok: true }, callId },
   ]
 }

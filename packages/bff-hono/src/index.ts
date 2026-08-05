@@ -1,24 +1,45 @@
 import { AgentKitError } from '@agent-kit/core'
-import type { AgentHarness } from '@agent-kit/core'
+import type { AgentHarness, AuditLogger } from '@agent-kit/core'
 import { Hono } from 'hono'
 
 /** 创建不持有密钥的 HTTP 边界；密钥、会话与 harness 均由 BFF 服务端注入。 */
 export function createAgentBff(options: {
   harness: AgentHarness
   authenticate: (request: Request) => Promise<{ subject: string } | null>
+  /**
+   * 审计日志。不注入时边界上的失败在服务端不留任何痕迹 ——
+   * 排查「扩展侧报了个错但服务端什么都看不到」时这是唯一线索。
+   */
+  audit?: AuditLogger
 }) {
   const app = new Hono()
 
+  /** 记一笔边界事件。只记非敏感字段，不含 Prompt 正文与业务上下文。 */
+  function audit(requestId: string, route: string, startedAt: number, errorCode?: string): void {
+    void options.audit?.log({
+      requestId,
+      durationMs: Date.now() - startedAt,
+      toolName: route,
+      ...(errorCode ? { errorCode } : {}),
+    })
+  }
+
   app.post('/v1/agent/sessions/:sessionId/run', async (context) => {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
+    const startedAt = Date.now()
     try {
       const identity = await options.authenticate(context.req.raw)
-      if (!identity) return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
+      if (!identity) {
+        audit(requestId, 'run', startedAt, 'UNAUTHORIZED')
+        return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
+      }
       const body = await context.req.json<{ input?: unknown; context?: unknown; promptName?: unknown }>()
       if (typeof body.input !== 'string' || !body.input.trim() || !body.context || typeof body.context !== 'object' || Array.isArray(body.context)) {
+        audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: '请求参数不合法' }, 400)
       }
       if (body.promptName !== undefined && typeof body.promptName !== 'string') {
+        audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: 'promptName 必须是字符串' }, 400)
       }
       // 把已认证主体绑定到 session namespace，防止跨用户读取同一 sessionId 的上下文。
@@ -29,19 +50,30 @@ export function createAgentBff(options: {
         context: body.context as Record<string, unknown>,
         ...(body.promptName ? { promptName: body.promptName } : {}),
       })
+      audit(requestId, `run:${result.type}`, startedAt)
       return context.json(result)
     } catch (error) {
-      return context.json(toErrorPayload(error, requestId), 500)
+      const payload = toErrorPayload(error, requestId)
+      audit(requestId, 'run', startedAt, payload.code)
+      // message 里可能带端点返回的具体原因（例如 LLM 400 的错误描述），
+      // 这对排查是必需的，所以单独打一行完整信息到 stderr。
+      options.audit?.log({ requestId, durationMs: 0, errorCode: payload.message })
+      return context.json(payload, 500)
     }
   })
 
   app.post('/v1/agent/sessions/:sessionId/tool-results/:callId', async (context) => {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
+    const startedAt = Date.now()
     try {
       const identity = await options.authenticate(context.req.raw)
-      if (!identity) return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
+      if (!identity) {
+        audit(requestId, 'tool-results', startedAt, 'UNAUTHORIZED')
+        return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
+      }
       const body = await context.req.json<{ output?: unknown }>()
       if (!Object.prototype.hasOwnProperty.call(body, 'output')) {
+        audit(requestId, 'tool-results', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: '缺少工具输出' }, 400)
       }
       // 远端工具结果只允许回填当前用户、当前 session 尚未完成的 callId。
@@ -51,9 +83,13 @@ export function createAgentBff(options: {
         callId: context.req.param('callId'),
         output: body.output,
       })
+      audit(requestId, `tool-results:${result.type}`, startedAt)
       return context.json(result)
     } catch (error) {
-      return context.json(toErrorPayload(error, requestId), 500)
+      const payload = toErrorPayload(error, requestId)
+      audit(requestId, 'tool-results', startedAt, payload.code)
+      options.audit?.log({ requestId, durationMs: 0, errorCode: payload.message })
+      return context.json(payload, 500)
     }
   })
 
