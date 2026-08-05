@@ -22,6 +22,8 @@ export type SessionMessage =
   | { role: 'user'; content: unknown }
   | { role: 'assistant'; content: unknown; toolCalls?: ToolCall[] }
   | { role: 'tool'; content: unknown; callId: string; toolName?: string }
+  /** 运行期注入的系统消息（例如上下文裁剪摘要）。不落库，只在发给模型时前置。 */
+  | { role: 'system'; content: unknown }
 
 /** LLM 密钥配置，适配器从受信任来源读取后注入。 */
 export interface LlmSecret {
@@ -45,6 +47,12 @@ export interface SessionStore {
 export interface PendingCall {
   sessionId: string
   toolName: string
+  /**
+   * 发起本次调用时所用的提示词名称。
+   * 必须随挂起状态一起保存：resume 要用同一个提示词继续，否则一次工具循环的
+   * 前后两半会用不同提示词（甚至不同输出协议），行为将不可预测。
+   */
+  promptName?: string
 }
 
 /**

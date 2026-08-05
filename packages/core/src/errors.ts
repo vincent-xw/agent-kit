@@ -13,6 +13,7 @@ export type AgentKitErrorCode =
   | 'LLM_OUTPUT_PROTOCOL_INVALID'
   | 'PENDING_CALL_NOT_FOUND'
   | 'PROMPT_ALREADY_REGISTERED'
+  | 'PROMPT_NOT_FOUND'
 
 /** 所有可预期失败统一抛出带 code 的 AgentKitError。 */
 export class AgentKitError extends Error {

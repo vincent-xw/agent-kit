@@ -35,7 +35,13 @@ export interface AgentHarnessDependencies {
 
 /** 最大步数受限的 模型 -> 工具调用 -> 工具结果 -> 模型 循环。 */
 export interface AgentHarness {
-  run(request: { sessionId: string; input: string; context: Record<string, unknown> }): Promise<HarnessResult>
+  run(request: {
+    sessionId: string
+    input: string
+    context: Record<string, unknown>
+    /** 指定使用哪个已注册提示词；省略时用默认（首个注册）提示词。 */
+    promptName?: string
+  }): Promise<HarnessResult>
   /** 回填远端 Tool Host 执行结果并继续循环。 */
   resume(request: { sessionId: string; callId: string; output: unknown }): Promise<HarnessResult>
 }
@@ -86,20 +92,34 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
   const pendingCalls = deps.pendingCalls ?? createMemoryPendingCallStore()
   const toolTimeoutMs = deps.toolTimeoutMs ?? 30_000
 
-  function defaultPrompt() {
-    return deps.prompts?.getDefault()
+  /**
+   * 按名解析提示词；未指定名称时回退到默认（首个注册）提示词。
+   * 之前这里死取 getDefault()，导致第二个注册的提示词及其输出协议永远无法生效。
+   */
+  function resolvePrompt(promptName?: string) {
+    if (!deps.prompts) return undefined
+    if (!promptName) return deps.prompts.getDefault()
+    const found = deps.prompts.getByName(promptName)
+    if (!found) throw new AgentKitError('PROMPT_NOT_FOUND', `提示词未注册：${promptName}`)
+    return found
   }
 
-  /** 应用上下文裁剪；未注入 ContextManager 时发送完整历史。 */
+  /**
+   * 应用上下文裁剪，并把裁剪摘要作为 system 消息前置。
+   * 不注入摘要的话模型不知道自己丢了上下文——它会以为看到的就是完整历史。
+   */
   function trimHistory(sessionId: string, history: SessionMessage[]): SessionMessage[] {
     if (!deps.context) return history
     deps.context.save(sessionId, history)
-    return deps.context.load(sessionId)
+    const trimmed = deps.context.load(sessionId)
+    const summary = deps.context.getSummary(sessionId)
+    if (!summary) return trimmed
+    return [{ role: 'system', content: summary }, ...trimmed]
   }
 
   /** 校验模型最终输出是否符合 prompt 声明的输出协议。 */
-  function applyOutputProtocol(output: unknown): unknown {
-    const protocol = defaultPrompt()?.protocol
+  function applyOutputProtocol(output: unknown, promptName?: string): unknown {
+    const protocol = resolvePrompt(promptName)?.protocol
     if (!protocol) return output
     // 声明了 JSON 协议时模型返回的是 JSON 文本，先解析再校验。
     let candidate = output
@@ -122,13 +142,14 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
     input: string,
     context: Record<string, unknown>,
     history: SessionMessage[],
+    promptName?: string,
   ): Promise<HarnessResult> {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
     // 本次用户输入在首轮发出后即并入历史，避免后续轮次重复追加。
     let pendingInput = input
     for (let step = 0; step < deps.maxSteps; step += 1) {
       const startedAt = Date.now()
-      const prompt = defaultPrompt()
+      const prompt = resolvePrompt(promptName)
       const toolSchemas = toToolSchemas(deps.tools.list())
       const result = await deps.llm.complete({
         ...(pendingInput ? { input: pendingInput } : {}),
@@ -145,7 +166,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       }
 
       if (result.type === 'final') {
-        const output = applyOutputProtocol(result.output)
+        const output = applyOutputProtocol(result.output, promptName)
         history.push({ role: 'assistant', content: result.output })
         await deps.sessions.save(sessionId, history)
         return { type: 'final', output }
@@ -160,7 +181,12 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${call.toolName}`)
         const parsedInput = parseWithCode(tool.input, call.input, 'TOOL_INPUT_INVALID')
         if (tool.execution === 'remote') {
-          await pendingCalls.set(call.callId, { sessionId, toolName: call.toolName })
+          // promptName 随挂起状态保存：resume 要用同一个提示词继续。
+          await pendingCalls.set(call.callId, {
+            sessionId,
+            toolName: call.toolName,
+            ...(promptName ? { promptName } : {}),
+          })
           remoteCalls.push({ callId: call.callId, toolName: call.toolName, input: parsedInput })
           continue
         }
@@ -208,7 +234,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
   return {
     async run(request) {
       const history = [...(await deps.sessions.load(request.sessionId))]
-      return runLoop(request.sessionId, request.input, request.context, history)
+      return runLoop(request.sessionId, request.input, request.context, history, request.promptName)
     },
     async resume(request) {
       const pending = await pendingCalls.get(request.callId)
@@ -228,8 +254,8 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         await deps.sessions.save(request.sessionId, history)
         return { type: 'pending_tool_calls', calls: await remainingCalls(history) }
       }
-      // 回填后继续模型循环，无需再附加新的用户输入。
-      return runLoop(request.sessionId, '', {}, history)
+      // 回填后继续模型循环，沿用发起调用时的提示词，无需再附加新的用户输入。
+      return runLoop(request.sessionId, '', {}, history, pending.promptName)
     },
   }
 

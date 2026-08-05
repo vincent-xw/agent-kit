@@ -46,6 +46,10 @@ function toOpenAiMessages(request: LlmClientRequest): OpenAiMessage[] {
     messages.push({ role: 'system', content: `context: ${JSON.stringify(request.context)}` })
   }
   for (const message of request.messages) {
+    if (message.role === 'system') {
+      messages.push({ role: 'system', content: serialize(message.content) })
+      continue
+    }
     if (message.role === 'assistant') {
       const content = message.content === null || message.content === undefined ? null : serialize(message.content)
       messages.push({

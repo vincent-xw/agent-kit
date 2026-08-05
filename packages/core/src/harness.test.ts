@@ -463,7 +463,55 @@ describe('AgentHarness', () => {
     })
 
     await harness.run({ sessionId: 's-20', input: '继续', context: {} })
-    expect(seen).toHaveLength(2)
+    // 裁剪后的 2 条历史，加上前置的裁剪摘要 system 消息。
+    expect(seen.filter((message) => message.role !== 'system')).toHaveLength(2)
+  })
+
+  it('裁剪摘要作为 system 消息发给模型', async () => {
+    // 不注入摘要模型就不知道自己丢了上下文——它会以为看到的就是完整历史。
+    const sessions = createMemorySessionStore()
+    await sessions.save('s-23', [
+      { role: 'user', content: '1' },
+      { role: 'user', content: '2' },
+      { role: 'user', content: '3' },
+      { role: 'user', content: '4' },
+    ])
+    let seen: SessionMessage[] = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seen = [...request.messages]
+          return { type: 'final', output: 'done' }
+        },
+      },
+      sessions,
+      tools: createToolRegistry(),
+      maxSteps: 2,
+      context: createContextManager({ maxMessages: 2 }),
+    })
+
+    await harness.run({ sessionId: 's-23', input: '继续', context: {} })
+    expect(seen[0]).toMatchObject({ role: 'system' })
+    expect(String((seen[0] as { content: unknown }).content)).toContain('已裁剪')
+  })
+
+  it('未发生裁剪时不注入摘要消息', async () => {
+    let seen: SessionMessage[] = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seen = [...request.messages]
+          return { type: 'final', output: 'done' }
+        },
+      },
+      sessions: createMemorySessionStore(),
+      tools: createToolRegistry(),
+      maxSteps: 2,
+      context: createContextManager({ maxMessages: 10 }),
+    })
+
+    await harness.run({ sessionId: 's-24', input: '你好', context: {} })
+    expect(seen.some((message) => message.role === 'system')).toBe(false)
   })
 
   it('声明输出协议时要求 JSON 并校验模型输出', async () => {
@@ -501,5 +549,110 @@ describe('AgentHarness', () => {
     })
 
     await expect(harness.run({ sessionId: 's-22', input: '评估', context: {} })).rejects.toMatchObject({ code: 'LLM_OUTPUT_PROTOCOL_INVALID' })
+  })
+})
+
+describe('按名选择提示词', () => {
+  /** 注册两个提示词：第一个无协议（会成为默认），第二个带协议。 */
+  function twoPrompts() {
+    const prompts = createPromptRegistry()
+    prompts.register({ name: 'browser-automation', version: '1', prompt: '你在操作浏览器' })
+    prompts.register({
+      name: 'candidate-assessment',
+      version: '1',
+      prompt: '评估候选人',
+      protocol: z.object({ decisions: z.array(z.object({ index: z.number() })) }),
+    })
+    return prompts
+  }
+
+  it('省略 promptName 时使用默认（首个注册）提示词', async () => {
+    let seen: string | undefined
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seen = request.systemPrompt
+          return { type: 'final', output: 'done' }
+        },
+      },
+      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 2, prompts: twoPrompts(),
+    })
+    await harness.run({ sessionId: 's-p1', input: 'hi', context: {} })
+    expect(seen).toBe('你在操作浏览器')
+  })
+
+  it('指定 promptName 时使用该提示词', async () => {
+    // 之前 harness 死取 getDefault()，第二个注册的提示词永远选不中。
+    let seen: string | undefined
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seen = request.systemPrompt
+          return { type: 'final', output: JSON.stringify({ decisions: [] }) }
+        },
+      },
+      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 2, prompts: twoPrompts(),
+    })
+    await harness.run({ sessionId: 's-p2', input: 'hi', context: {}, promptName: 'candidate-assessment' })
+    expect(seen).toBe('评估候选人')
+  })
+
+  it('非默认提示词的输出协议能够生效', async () => {
+    // 这是原缺陷的核心后果：candidate-assessment 的 protocol 此前完全不可达。
+    const harness = createAgentHarness({
+      llm: { complete: async () => ({ type: 'final', output: JSON.stringify({ decisions: 'not-an-array' }) }) },
+      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 2, prompts: twoPrompts(),
+    })
+    await expect(
+      harness.run({ sessionId: 's-p3', input: 'hi', context: {}, promptName: 'candidate-assessment' }),
+    ).rejects.toMatchObject({ code: 'LLM_OUTPUT_PROTOCOL_INVALID' })
+  })
+
+  it('默认提示词无协议时不强制 JSON', async () => {
+    let sawJsonFlag: boolean | undefined = true
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          sawJsonFlag = request.responseFormatJson
+          return { type: 'final', output: '纯文本' }
+        },
+      },
+      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 2, prompts: twoPrompts(),
+    })
+    await harness.run({ sessionId: 's-p4', input: 'hi', context: {} })
+    expect(sawJsonFlag).toBeUndefined()
+  })
+
+  it('提示词未注册时返回 PROMPT_NOT_FOUND', async () => {
+    const harness = createAgentHarness({
+      llm: { complete: async () => ({ type: 'final', output: 'done' }) },
+      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 2, prompts: twoPrompts(),
+    })
+    await expect(
+      harness.run({ sessionId: 's-p5', input: 'hi', context: {}, promptName: 'nonexistent' }),
+    ).rejects.toMatchObject({ code: 'PROMPT_NOT_FOUND' })
+  })
+
+  it('resume 沿用发起调用时的提示词', async () => {
+    // 否则一次工具循环的前后两半会用不同提示词（甚至不同输出协议）。
+    const prompts = twoPrompts()
+    const tools = createToolRegistry()
+    tools.register({ name: 'browser.read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    const seenPrompts: Array<string | undefined> = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seenPrompts.push(request.systemPrompt)
+          return seenPrompts.length === 1
+            ? { type: 'tool_calls', calls: [{ callId: 'c1', toolName: 'browser.read_page', input: {} }] }
+            : { type: 'final', output: JSON.stringify({ decisions: [] }) }
+        },
+      },
+      sessions: createMemorySessionStore(), tools, maxSteps: 3, prompts,
+    })
+
+    await harness.run({ sessionId: 's-p6', input: 'hi', context: {}, promptName: 'candidate-assessment' })
+    await harness.resume({ sessionId: 's-p6', callId: 'c1', output: { title: '首页' } })
+    expect(seenPrompts).toEqual(['评估候选人', '评估候选人'])
   })
 })

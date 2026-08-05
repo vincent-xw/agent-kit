@@ -66,6 +66,18 @@ describe('SQLite SecretProvider', () => {
     expect(store.get('call-1')).toBeUndefined()
   })
 
+  it('挂起调用一并持久化 promptName', async () => {
+    // 不存的话 BFF 重启后 resume 会回退到默认提示词，一次工具循环的前后两半用上不同协议。
+    const database = new DatabaseSync(':memory:')
+    const store = createSqlitePendingCallStore(database)
+    store.set('call-2', { sessionId: 's-1', toolName: 'browser.click', promptName: 'candidate-assessment' })
+    expect(createSqlitePendingCallStore(database).get('call-2')).toEqual({
+      sessionId: 's-1',
+      toolName: 'browser.click',
+      promptName: 'candidate-assessment',
+    })
+  })
+
   it('远端工具挂起后新 runtime 实例仍能回填', async () => {
     const database = new DatabaseSync(':memory:')
     const first = createSqliteAgentRuntime({ database, masterKey: validMasterKey, maxSteps: 3 })

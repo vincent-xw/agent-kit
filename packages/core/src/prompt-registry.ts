@@ -15,12 +15,15 @@ export interface RegisteredPrompt {
 export interface PromptRegistry {
   register(spec: { name: string; version: string; prompt: string; protocol?: z.ZodType }): void
   get(name: string, version: string): RegisteredPrompt | undefined
+  /** 按名取（忽略 version）；同名多版本时返回最后注册的那个。 */
+  getByName(name: string): RegisteredPrompt | undefined
   getDefault(): RegisteredPrompt | undefined
 }
 
 /** 内存实现；同名同版本重复注册直接报错，避免提示词被静默覆盖。 */
 export function createPromptRegistry(): PromptRegistry {
   const prompts = new Map<string, RegisteredPrompt>()
+  const byName = new Map<string, RegisteredPrompt>()
   let defaultPrompt: RegisteredPrompt | undefined
   return {
     register(spec) {
@@ -30,11 +33,15 @@ export function createPromptRegistry(): PromptRegistry {
       }
       const entry: RegisteredPrompt = { ...spec }
       prompts.set(key, entry)
+      byName.set(spec.name, entry)
       // 首个注册的提示词作为默认系统提示词，供 harness 无显式选择时使用。
       if (!defaultPrompt) defaultPrompt = entry
     },
     get(name, version) {
       return prompts.get(`${name}@${version}`)
+    },
+    getByName(name) {
+      return byName.get(name)
     },
     getDefault() {
       return defaultPrompt

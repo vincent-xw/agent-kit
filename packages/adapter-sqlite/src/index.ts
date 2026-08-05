@@ -80,20 +80,31 @@ export function createSqlitePendingCallStore(database: DatabaseSync): PendingCal
     call_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
+    prompt_name TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   )`)
+  // 兼容早于 prompt_name 的既有库文件；已存在该列时 ALTER 会失败，忽略即可。
+  try {
+    database.exec('ALTER TABLE agent_pending_calls ADD COLUMN prompt_name TEXT')
+  } catch {
+    // 列已存在。
+  }
   return {
     get(callId: string) {
-      const row = database.prepare('SELECT session_id, tool_name FROM agent_pending_calls WHERE call_id = ?').get(callId) as
-        | { session_id?: string; tool_name?: string }
+      const row = database.prepare('SELECT session_id, tool_name, prompt_name FROM agent_pending_calls WHERE call_id = ?').get(callId) as
+        | { session_id?: string; tool_name?: string; prompt_name?: string | null }
         | undefined
       if (!row?.session_id || !row.tool_name) return undefined
-      return { sessionId: row.session_id, toolName: row.tool_name }
+      return {
+        sessionId: row.session_id,
+        toolName: row.tool_name,
+        ...(row.prompt_name ? { promptName: row.prompt_name } : {}),
+      }
     },
     set(callId: string, call: PendingCall) {
       database
-        .prepare('INSERT OR REPLACE INTO agent_pending_calls (call_id, session_id, tool_name) VALUES (?, ?, ?)')
-        .run(callId, call.sessionId, call.toolName)
+        .prepare('INSERT OR REPLACE INTO agent_pending_calls (call_id, session_id, tool_name, prompt_name) VALUES (?, ?, ?, ?)')
+        .run(callId, call.sessionId, call.toolName, call.promptName ?? null)
     },
     delete(callId: string) {
       database.prepare('DELETE FROM agent_pending_calls WHERE call_id = ?').run(callId)
