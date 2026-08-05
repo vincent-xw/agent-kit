@@ -6,6 +6,8 @@
     "node": ">=22.0.0"
   },
   "scripts": {
+    "dev:bff": "pnpm --filter browser-extension-bff dev",
+    "start:bff": "pnpm --filter browser-extension-bff start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
