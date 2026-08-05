@@ -3,6 +3,10 @@ dist/
 coverage/
 .wrangler/
 .dev.vars
+# 真实密钥只留在本地；.env.example 是模板，可以提交。
+.env
+.env.local
+!.env.example
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

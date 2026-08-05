@@ -14,6 +14,10 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prestart": "pnpm --filter @agent-kit/core --filter @agent-kit/bff-hono --filter @agent-kit/adapter-sqlite --filter browser-extension-bff build",
+    "start": "node dist/server.js",
+    "predev": "pnpm --filter @agent-kit/core --filter @agent-kit/bff-hono --filter @agent-kit/adapter-sqlite build",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput & node --watch dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

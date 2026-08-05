@@ -16,17 +16,47 @@
 
 ## 启动
 
-```bash
-pnpm install && pnpm --filter browser-extension-bff build
-```
+首次先装依赖：
 
 ```bash
-AGENT_KIT_MASTER_KEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=') BFF_API_TOKEN=dev-token LLM_API_KEY=<你的 Ark Key> LLM_MODEL=<你的模型名> node examples/browser-extension-bff/dist/server.js
+pnpm install
 ```
+
+把环境变量准备好（`.env.example` 是模板，`.env` 已被 gitignore）：
+
+```bash
+cd examples/browser-extension-bff && cp .env.example .env
+```
+
+填好 `.env` 后从仓库根目录启动。脚本本身不读 `.env`，需要先导出：
+
+```bash
+set -a && source examples/browser-extension-bff/.env && set +a && pnpm --filter browser-extension-bff dev
+```
+
+| 命令 | 用途 |
+|---|---|
+| `pnpm --filter browser-extension-bff dev` | 开发模式。`tsc --watch` 增量编译 + `node --watch` 自动重启，改 prompt 或工具定义后无需手动重编 |
+| `pnpm --filter browser-extension-bff start` | 一次性启动。先编译全部依赖包再跑 |
+
+两者都会自动先编译 `@agent-kit/core`、`bff-hono`、`adapter-sqlite` —— 它们是 workspace
+包，不编译就没有 `dist` 可导入。
 
 默认监听 `http://localhost:8787`。扩展设置里填入该地址与 `BFF_API_TOKEN` 即可。
 
-> 主密钥每次随机生成的话，上一次落库的密文将无法解密（`key_version` 不匹配）。要复用同一个 SQLite 文件，请把主密钥固定下来。
+不想用 `.env` 就直接前置环境变量：
+
+```bash
+AGENT_KIT_MASTER_KEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=') BFF_API_TOKEN=dev-token LLM_API_KEY=<你的 Ark Key> LLM_MODEL=<你的模型名> pnpm --filter browser-extension-bff start
+```
+
+> 主密钥每次随机生成的话，上一次落库的密文将无法解密（`key_version` 不匹配）。要复用同一个 SQLite 文件，请把主密钥固定在 `.env` 里。
+
+验证服务在跑（返回 401 即说明已启动且鉴权生效）：
+
+```bash
+curl -s -w " HTTP %{http_code}\n" localhost:8787/v1/agent/sessions/s/run -H 'content-type: application/json' -d '{"input":"hi","context":{}}'
+```
 
 ## 协议
 
