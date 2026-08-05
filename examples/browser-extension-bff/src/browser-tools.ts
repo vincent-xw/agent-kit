@@ -10,13 +10,15 @@ import type { ToolDefinition } from '@agent-kit/core'
  * 这条契约必须写进 description，否则模型无从知晓，而错误的后果是「点了但点错且不报错」。
  */
 
-/** 元素定位意图。选择器由扩展按「用户配置优先、站点 fallback 兜底」解析。 */
+/** 元素定位意图。三种方式任选：ref（推荐）、显式选择器、预设角色。 */
 const locatorSchema = z.object({
+  ref: z.number().int().optional().describe('来自 browser.snapshot 的元素引用。自由操作时优先用这个'),
   role: z
     .enum(['candidateListItem', 'candidateName', 'resumeContainer', 'favoriteButton', 'greetButton', 'messageInput', 'sendButton', 'dialog'])
-    .describe('目标元素的语义角色，扩展据此选择对应的选择器列表'),
-  selector: z.string().optional().describe('可选的显式 CSS 选择器；提供时优先于 role 对应的配置'),
-  index: z.number().int().optional().describe('同一角色匹配到多个元素时的序号，从 0 开始'),
+    .optional()
+    .describe('预设元素角色，仅用于 BOSS 直聘的既有流程'),
+  selector: z.string().optional().describe('显式 CSS 选择器'),
+  index: z.number().int().optional().describe('同一条件匹配到多个元素时的序号，从 0 开始'),
 })
 
 /** 定位结果：坐标 + 可点击性判定。 */
@@ -52,11 +54,38 @@ const verifyDimensionSchema = z.object({
 
 export const browserToolDefinitions: ToolDefinition[] = [
   {
+    name: 'browser.snapshot',
+    execution: 'remote',
+    description:
+      '列出当前视口内所有可交互元素及其 ref 编号。这是自由操作的**起点**：先快照看清页面上有什么，再用 ref 指定目标，不要凭猜测写选择器。页面变化（点击、滚动、导航）后需要重新快照。',
+    input: z.object({}),
+    output: z.object({
+      url: z.string(),
+      title: z.string(),
+      entries: z.array(
+        z.object({
+          ref: z.number().describe('元素引用，用于后续 click / input_text 等动作'),
+          tag: z.string(),
+          label: z.string().describe('可读标签：aria-label / placeholder / 文本内容等'),
+          kind: z.string().describe('元素类型，例如 button / link / textbox / checkbox'),
+          x: z.number(),
+          y: z.number(),
+          width: z.number(),
+          height: z.number(),
+          occluded: z.boolean().optional().describe('为真表示被遮挡，不应直接点击'),
+          disabled: z.boolean().optional(),
+          value: z.string().optional().describe('输入类元素的当前值'),
+        }),
+      ),
+      truncated: z.number().optional().describe('因数量上限被省略的元素数；大于 0 说明还有元素没列出'),
+    }),
+  },
+  {
     name: 'browser.read_page',
     execution: 'remote',
-    description: '读取当前页面的标题、URL 与正文摘要。只读操作，不改变页面状态。',
+    description: '读取当前页面的标题、URL 与正文摘要。只读操作，不改变页面状态。需要操作元素时用 browser.snapshot。',
     input: z.object({
-      includeCandidateList: z.boolean().optional().describe('是否同时读取候选人列表'),
+      includeCandidateList: z.boolean().optional().describe('是否同时读取候选人列表（BOSS 直聘专用）'),
     }),
     output: z.object({
       title: z.string(),
@@ -71,7 +100,7 @@ export const browserToolDefinitions: ToolDefinition[] = [
     name: 'browser.locate_element',
     execution: 'remote',
     description:
-      '定位元素并返回其中心坐标与可点击性判定。每次执行写动作前都必须重新调用本工具重算坐标——弹窗、滚动、虚拟列表与重渲染都会让旧坐标失效。',
+      '定位元素并返回其中心坐标与可点击性判定。已有 ref 时不必调用本工具 —— click / input_text 直接接受 ref 并会自行取最新坐标。',
     input: locatorSchema,
     output: locateResultSchema,
   },
@@ -79,24 +108,31 @@ export const browserToolDefinitions: ToolDefinition[] = [
     name: 'browser.click',
     execution: 'remote',
     description:
-      '在给定坐标执行真实点击（CDP 三段鼠标事件）。坐标必须来自刚刚一次 browser.locate_element 的返回值，不要复用更早的坐标。',
-    input: z.object({
-      x: z.number().describe('横坐标，相对主页面 viewport 的 CSS 像素，不乘 devicePixelRatio'),
-      y: z.number().describe('纵坐标，相对主页面 viewport 的 CSS 像素，不乘 devicePixelRatio'),
-      label: z.string().optional().describe('用于日志的可读标签，例如「打招呼按钮」'),
-    }),
+      '执行真实点击（CDP 三段鼠标事件）。优先传 ref —— 扩展会按 ref 取当前坐标，无需你关心坐标是否过期。也可直接传 x/y，但那必须来自刚刚一次定位。',
+    input: z
+      .object({
+        ref: z.number().int().optional().describe('来自 browser.snapshot 的元素引用（推荐）'),
+        x: z.number().optional().describe('横坐标，CSS 像素，不乘 devicePixelRatio。传了 ref 就不必传'),
+        y: z.number().optional().describe('纵坐标，CSS 像素，不乘 devicePixelRatio。传了 ref 就不必传'),
+        label: z.string().optional().describe('用于日志的可读标签，例如「搜索按钮」'),
+      })
+      .describe('ref 与 x/y 至少给一组'),
     output: actionResultSchema,
   },
   {
     name: 'browser.input_text',
     execution: 'remote',
     description:
-      '向输入框写入文本（含中文）。会先点击该坐标建立真实焦点，再经 CDP Input.insertText 写入；焦点未落上则直接失败，不会写入。',
-    input: z.object({
-      x: z.number().describe('输入框中心横坐标，CSS 像素'),
-      y: z.number().describe('输入框中心纵坐标，CSS 像素'),
-      text: z.string().describe('要写入的完整文本'),
-    }),
+      '向输入框写入文本（含中文）。会先点击目标建立真实焦点，再经 CDP Input.insertText 写入；焦点未落上则直接失败，不会写入。优先传 ref。',
+    input: z
+      .object({
+        ref: z.number().int().optional().describe('输入框的 ref（推荐）'),
+        x: z.number().optional().describe('输入框中心横坐标，CSS 像素'),
+        y: z.number().optional().describe('输入框中心纵坐标，CSS 像素'),
+        text: z.string().describe('要写入的完整文本'),
+        clearFirst: z.boolean().optional().describe('写入前是否先全选删除已有内容'),
+      })
+      .describe('ref 与 x/y 至少给一组'),
     output: actionResultSchema.extend({
       focused: z.boolean().optional(),
       actualValue: z.string().optional().describe('写入后读回的输入框内容'),
@@ -118,7 +154,7 @@ export const browserToolDefinitions: ToolDefinition[] = [
   {
     name: 'browser.scroll',
     execution: 'remote',
-    description: '滚动页面或指定容器。滚动后所有已有坐标失效，必须重新定位。',
+    description: '滚动页面。滚动后所有坐标与快照都已过期，必须重新调用 browser.snapshot。',
     input: z.object({
       deltaY: z.number().describe('纵向滚动量，正值向下'),
       x: z.number().optional().describe('滚动锚点横坐标，CSS 像素；省略则使用视口中心'),
@@ -130,7 +166,7 @@ export const browserToolDefinitions: ToolDefinition[] = [
     name: 'browser.verify',
     execution: 'remote',
     description:
-      '验证上一个动作是否真的生效。不要以 browser.click 返回 ok 就认为成功——命令下发成功不等于页面产生了变化。按需组合多个维度。',
+      '验证上一个动作是否真的生效。不要以 browser.click 返回 ok 就认为成功 —— 命令下发成功不等于页面产生了变化。按需组合多个维度。',
     input: z.object({
       expectDialog: z.string().optional().describe('期望出现的弹窗选择器'),
       expectDomChangeIn: z.string().optional().describe('期望文案或类名发生变化的元素选择器'),
@@ -155,7 +191,7 @@ export const browserToolDefinitions: ToolDefinition[] = [
   {
     name: 'browser.screenshot',
     execution: 'remote',
-    description: '截取当前视口。用于在定位反复失败时观察页面实际状态。',
+    description: '截取当前视口。用于在快照信息不足、或反复定位失败时观察页面实际状态。',
     input: z.object({
       format: z.enum(['png', 'jpeg']).optional(),
     }),
@@ -191,8 +227,34 @@ export const candidateAssessmentPrompt = [
 ].join('\n')
 
 /**
- * 浏览器自动化系统提示词。核心是把单步闭环约束交代清楚，
- * 否则模型会倾向于一次性规划多个坐标然后连续点击——那是坐标失效的主要来源。
+ * 自由指令提示词。这是默认提示词 —— 用户给一句自然语言指令，模型自己规划动作序列。
+ *
+ * 重点交代两件事：先快照后动作（否则模型会凭猜测写选择器），以及每步验证
+ * （否则「命令没报错」会被当成成功）。
+ */
+export const freeFormPrompt = [
+  '你在通过一组浏览器工具操作用户当前打开的网页。用户会用自然语言描述想做的事，由你规划并执行。',
+  '',
+  '工作方式：',
+  '1. 先调用 browser.snapshot 看清页面上有哪些可交互元素。不要凭猜测写 CSS 选择器。',
+  '2. 用快照返回的 ref 指定操作目标（browser.click({ref: 5})）。扩展会按 ref 取当前坐标，你不必关心坐标是否过期。',
+  '3. 每次只执行一个写动作（click / input_text / press_key / scroll）。',
+  '4. 动作之后用 browser.verify 确认页面真的变了。命令返回 ok 不等于动作生效。',
+  '5. 页面发生变化后（点击、滚动、导航、弹窗出现）重新 browser.snapshot —— 旧 ref 可能已失效。',
+  '',
+  '注意事项：',
+  '- 快照返回 occluded 为真的元素不要直接点击，先处理遮挡（关闭浮层或滚动）。',
+  '- 快照返回 truncated 大于 0 说明还有元素没列出，需要时滚动后重新快照。',
+  '- ref 失效（stale）时不要重试同一个 ref，重新快照取新的。',
+  '- 用户的写操作可能需要本人逐个批准，被拒绝时不要绕道重试，直接说明该动作未获批准。',
+  '- 某些域名与路径不在允许范围内，写操作会被拒绝。遇到这种情况说明原因，不要尝试其他方式。',
+  '',
+  '完成后用简洁的中文说明你做了什么、结果如何。若中途失败，说明失败在哪一步、观测到什么。',
+].join('\n')
+
+/**
+ * 浏览器自动化系统提示词（BOSS 直聘预设流程专用）。
+ * 与自由指令的区别是它假定了固定的业务动作序列。
  */
 export const browserAutomationPrompt = [
   '你在通过一组浏览器工具操作真实网页，目标站点是 BOSS 直聘。',

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { toToolSchema } from '@agent-kit/core'
+
 import { createBrowserExtensionBff } from './server.js'
 import { browserToolDefinitions } from './browser-tools.js'
 
@@ -201,8 +203,9 @@ describe('浏览器工具定义', () => {
     expect(browserToolDefinitions.every((tool) => tool.execute === undefined)).toBe(true)
   })
 
-  it('覆盖闭环所需的 8 个工具', () => {
+  it('覆盖闭环所需的 9 个工具', () => {
     expect(browserToolDefinitions.map((tool) => tool.name)).toEqual([
+      'browser.snapshot',
       'browser.read_page',
       'browser.locate_element',
       'browser.click',
@@ -216,5 +219,91 @@ describe('浏览器工具定义', () => {
 
   it('每个工具都有供模型理解用途的说明', () => {
     expect(browserToolDefinitions.every((tool) => (tool.description ?? '').length > 0)).toBe(true)
+  })
+
+  it('snapshot 是第一个工具，引导模型先看清页面', () => {
+    // 自由指令下模型若不先快照就会凭猜测写选择器，这是最主要的失败来源。
+    expect(browserToolDefinitions[0]?.name).toBe('browser.snapshot')
+  })
+
+  it('click 与 input_text 接受 ref，不强制传坐标', () => {
+    for (const name of ['browser.click', 'browser.input_text']) {
+      const tool = browserToolDefinitions.find((item) => item.name === name)
+      const schema = toToolSchema(tool!)
+      const properties = (schema.parameters as { properties: Record<string, unknown> }).properties
+      expect(properties.ref, `${name} 缺少 ref`).toBeDefined()
+      // 坐标必须可选，否则模型被迫先 locate 一次，ref 就失去意义了。
+      const required = (schema.parameters as { required?: string[] }).required ?? []
+      expect(required, `${name} 的坐标不应是必填`).not.toContain('x')
+      expect(required).not.toContain('y')
+    }
+  })
+
+  it('locate_element 的 role 已改为可选，不再绑死 BOSS 角色枚举', () => {
+    const tool = browserToolDefinitions.find((item) => item.name === 'browser.locate_element')
+    const required = (toToolSchema(tool!).parameters as { required?: string[] }).required ?? []
+    expect(required).not.toContain('role')
+  })
+
+  it('全部工具的 input schema 都能转成 JSON Schema', () => {
+    // 转换失败会让整轮 LLM 调用抛错，必须在这里挡住。
+    for (const tool of browserToolDefinitions) {
+      expect(() => toToolSchema(tool), `${tool.name} 无法转换`).not.toThrow()
+    }
+  })
+})
+
+describe('提示词注册', () => {
+  it('free-form 为默认提示词', async () => {
+    const { prompts, database } = await bff()
+    expect(prompts.getDefault()?.name).toBe('free-form')
+    database.close()
+  })
+
+  it('三个提示词均可按名取到', async () => {
+    const { prompts, database } = await bff()
+    for (const name of ['free-form', 'browser-automation', 'candidate-assessment']) {
+      expect(prompts.getByName(name), `${name} 未注册`).toBeDefined()
+    }
+    database.close()
+  })
+
+  it('只有 candidate-assessment 声明输出协议', async () => {
+    const { prompts, database } = await bff()
+    expect(prompts.getByName('free-form')?.protocol).toBeUndefined()
+    expect(prompts.getByName('candidate-assessment')?.protocol).toBeDefined()
+    database.close()
+  })
+
+  it('自由指令提示词交代先快照后动作', async () => {
+    const { prompts, database } = await bff()
+    const prompt = prompts.getByName('free-form')?.prompt ?? ''
+    expect(prompt).toContain('browser.snapshot')
+    expect(prompt).toContain('ref')
+    database.close()
+  })
+
+  it('按名指定 candidate-assessment 时其输出协议生效', async () => {
+    // 这是 harness getDefault() 缺陷的端到端回归：此前该协议永远不可达。
+    stubFinal(JSON.stringify({ decisions: 'not-an-array' }))
+    const { app, database } = await bff()
+    const response = await app.request('/v1/agent/sessions/s-1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer token-1' },
+      body: JSON.stringify({ input: '评估', context: {}, promptName: 'candidate-assessment' }),
+    })
+    await expect(response.json()).resolves.toMatchObject({ code: 'LLM_OUTPUT_PROTOCOL_INVALID' })
+    database.close()
+  })
+
+  it('promptName 非字符串时返回 REQUEST_INVALID', async () => {
+    const { app, database } = await bff()
+    const response = await app.request('/v1/agent/sessions/s-1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer token-1' },
+      body: JSON.stringify({ input: 'hi', context: {}, promptName: 123 }),
+    })
+    expect(response.status).toBe(400)
+    database.close()
   })
 })
