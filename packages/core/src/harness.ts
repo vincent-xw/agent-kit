@@ -243,9 +243,45 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
     return expected.size > 0
   }
 
+  /**
+   * 清除历史中「只发起了工具调用、没有对应结果」的残破轮次。
+   *
+   * 这类残破历史是任务中止的产物：一轮含远端调用时，harness 先持久化了带 toolCalls 的
+   * assistant 消息，结果没回来任务就停了（用户停止、断连、sidepanel 关闭）。
+   * 之后同一会话再发新指令，`run()` 会把这条残破历史原样发给模型，
+   * 而 OpenAI 兼容端点要求每个 tool_call_id 都有对应结果，于是直接 400。
+   *
+   * 修复策略：新指令意味着上一轮已被放弃，把那些没有结果的 assistant 消息连同
+   * 它们后面悬空的 tool 消息一起裁掉，只保留完整往返。
+   */
+  function sanitizeIncompleteRounds(history: SessionMessage[]): SessionMessage[] {
+    const filledCallIds = new Set(history.filter((m) => m.role === 'tool').map((m) => (m as { callId: string }).callId))
+    const keptAssistantCallIds = new Set<string>()
+    const result: SessionMessage[] = []
+    for (const message of history) {
+      if (message.role === 'assistant' && message.toolCalls?.length) {
+        // 只要有一个调用没回填，整条 assistant 连同它的未回填调用都丢弃。
+        if (!message.toolCalls.every((call) => filledCallIds.has(call.callId))) continue
+        for (const call of message.toolCalls) keptAssistantCallIds.add(call.callId)
+      }
+      if (message.role === 'tool') {
+        // 它的 assistant 已被丢弃，这条 tool 结果也无主，一并丢弃。
+        if (!keptAssistantCallIds.has(message.callId)) continue
+      }
+      result.push(message)
+    }
+    return result
+  }
+
   return {
     async run(request) {
-      const history = [...(await deps.sessions.load(request.sessionId))]
+      let history = [...(await deps.sessions.load(request.sessionId))]
+      const sanitized = sanitizeIncompleteRounds(history)
+      if (sanitized.length !== history.length) {
+        // 残破历史被裁掉后写回，避免下次再踩同一个 400。
+        await deps.sessions.save(request.sessionId, sanitized)
+        history = sanitized
+      }
       return runLoop(request.sessionId, request.input, request.context, history, request.promptName)
     },
     async resume(request) {

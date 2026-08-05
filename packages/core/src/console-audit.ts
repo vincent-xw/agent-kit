@@ -1,4 +1,5 @@
 import type { AuditEvent, AuditLogger } from './contracts.js'
+import type { LlmTraceEvent } from './llm-client.js'
 
 /**
  * 控制台审计日志。
@@ -59,4 +60,48 @@ export function logBoundaryError(
   durationMs = 0,
 ): void {
   void audit?.log({ requestId, durationMs, errorCode })
+}
+
+// ── verbose 日志 ──────────────────────────────────────────────────
+
+export interface VerboseLogOptions {
+  /** 是否输出。默认开启。 */
+  enabled?: boolean
+  /** 日志前缀。 */
+  prefix?: string
+  sink?: { log(message: string): void }
+}
+
+/**
+ * 把一次 LLM 调用的完整输入输出打出来，供排障。
+ *
+ * 这是有意越界的调试模式：会输出 Prompt 正文与模型原文（含工具调用、会话历史），
+ * 但**绝不会**输出 LLM API Key。生产环境不应开启 —— 需要 BFF 设置 LOG_LEVEL=verbose 才启用。
+ */
+export function createLlmVerboseLogger(options: VerboseLogOptions = {}): (event: LlmTraceEvent) => void {
+  const enabled = options.enabled ?? true
+  const prefix = options.prefix ?? '[bff:llm]'
+  const sink = options.sink ?? { log: (message: string) => console.log(message) }
+  return (event) => {
+    if (!enabled) return
+    if (event.phase === 'request') {
+      const body = event.body ?? {}
+      const messages = Array.isArray(body.messages) ? body.messages : []
+      const roleCounts = new Map<string, number>()
+      for (const message of messages as Array<{ role?: string }>) {
+        roleCounts.set(message.role ?? '?', (roleCounts.get(message.role ?? '?') ?? 0) + 1)
+      }
+      const summary = [...roleCounts.entries()].map(([role, count]) => `${role}×${count}`).join(', ')
+      sink.log(
+        `${prefix} → ${event.requestId} model=${String(body.model ?? '?')} tools=${Array.isArray(body.tools) ? body.tools.length : 0} messages(${summary})\n` +
+          `${JSON.stringify(body, null, 2)}`,
+      )
+      return
+    }
+    if (event.phase === 'response') {
+      sink.log(`${prefix} ← ${event.requestId} ${event.durationMs}ms\n${JSON.stringify(event.responseBody, null, 2)}`)
+      return
+    }
+    sink.log(`${prefix} ✗ ${event.requestId} ${event.durationMs}ms error=${JSON.stringify(event.error ?? event.responseBody ?? '')}`)
+  }
 }

@@ -8,6 +8,24 @@ export interface LlmClientConfig {
   model: string
   /** 请求超时毫秒数，默认 30 秒。 */
   timeoutMs?: number
+  /**
+   * 调试钩子。仅用于 verbose 排障：打印发给 LLM 的完整请求体与收到的原始响应。
+   * 默认不注入。开启时会输出 Prompt 正文与模型原文 —— 这是有意为之的调试模式，
+   * 生产环境不应开启。
+   */
+  trace?: (event: LlmTraceEvent) => void
+}
+
+/** 一次 LLM 调用的跟踪事件。 */
+export interface LlmTraceEvent {
+  requestId: string
+  phase: 'request' | 'response' | 'error'
+  /** 发给端点的 HTTP 请求体。request 阶段有值。 */
+  body?: Record<string, unknown>
+  /** 端点返回的原始响应。response 阶段有值。 */
+  responseBody?: unknown
+  durationMs: number
+  error?: unknown
 }
 
 /** 一次补全请求：input 为最新用户输入，messages 为会话历史，tools 为可调用工具声明。 */
@@ -149,8 +167,21 @@ async function readErrorDetail(response: { text(): Promise<string> }): Promise<s
 export function createLlmClient(config: LlmClientConfig): LlmClient {
   const timeoutMs = config.timeoutMs ?? 30_000
   const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`
+  const trace = config.trace
   return {
     async complete(request) {
+      const requestId = `llm-${Math.random().toString(36).slice(2, 9)}`
+      const startedAt = Date.now()
+      const body: Record<string, unknown> = {
+        model: config.model,
+        messages: toOpenAiMessages(request),
+        // 不发 tools 模型就不知道有哪些工具可调，工具调用链路整体不可达。
+        ...(request.tools && request.tools.length > 0
+          ? { tools: request.tools.map((tool) => ({ type: 'function', function: tool })) }
+          : {}),
+        ...(request.responseFormatJson ? { response_format: { type: 'json_object' } } : {}),
+      }
+      trace?.({ requestId, phase: 'request', body, durationMs: 0 })
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
       try {
@@ -162,18 +193,11 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
               'content-type': 'application/json',
               authorization: `Bearer ${config.apiKey}`,
             },
-            body: JSON.stringify({
-              model: config.model,
-              messages: toOpenAiMessages(request),
-              // 不发 tools 模型就不知道有哪些工具可调，工具调用链路整体不可达。
-              ...(request.tools && request.tools.length > 0
-                ? { tools: request.tools.map((tool) => ({ type: 'function', function: tool })) }
-                : {}),
-              ...(request.responseFormatJson ? { response_format: { type: 'json_object' } } : {}),
-            }),
+            body: JSON.stringify(body),
             signal: controller.signal,
           })
         } catch (error) {
+          trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, error })
           // 网络失败、DNS、超时与 abort 均归一化为稳定的 LLM_RESPONSE_INVALID。
           throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
         }
@@ -181,6 +205,7 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
           // 端点的错误正文才是唯一能说明「为什么 400」的信息（模型名不对、
           // tools 结构不合法、上下文超长…）。丢掉它就只剩一个无从下手的状态码。
           const detail = await readErrorDetail(response)
+          trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, responseBody: { status: response.status, detail } })
           throw new AgentKitError(
             'LLM_RESPONSE_INVALID',
             `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`,
@@ -192,6 +217,7 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
         } catch {
           throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应不是有效 JSON')
         }
+        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
         const result = extractResult(payload)
         if (!result) throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
         return result

@@ -550,6 +550,92 @@ describe('AgentHarness', () => {
 
     await expect(harness.run({ sessionId: 's-22', input: '评估', context: {} })).rejects.toMatchObject({ code: 'LLM_OUTPUT_PROTOCOL_INVALID' })
   })
+
+  it('run 时清除残破的未完成工具轮次', async () => {
+    // 一轮含远端调用时若被中止，harness 已持久化带 toolCalls 的 assistant 但没有对应结果。
+    // 之后同会话再发新指令，残破历史会原样发给模型，而 OpenAI 兼容端点要求
+    // 每个 tool_call_id 都有结果 —— 直接 400。run 必须裁掉这类残破轮次。
+    const sessions = createMemorySessionStore()
+    await sessions.save('s-25', [
+      { role: 'user', content: '之前的一轮' },
+      { role: 'assistant', content: null, toolCalls: [{ callId: 'c-orphan', toolName: 'browser_snapshot', input: {} }] },
+      // 注意：没有对应的 tool 结果消息 —— 这就是被中止的残破轮次。
+    ])
+    let seen: SessionMessage[] = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seen = [...request.messages]
+          return { type: 'final', output: 'done' }
+        },
+      },
+      sessions,
+      tools: createToolRegistry(),
+      maxSteps: 2,
+    })
+
+    await harness.run({ sessionId: 's-25', input: '新指令', context: {} })
+    // 残破的 assistant 被裁掉，发给模型的消息里没有无结果的 tool_calls。
+    const assistantWithCalls = seen.filter((m) => m.role === 'assistant' && m.toolCalls?.length)
+    expect(assistantWithCalls).toHaveLength(0)
+  })
+
+  it('run 时清除残破轮次后把清理结果写回存储', async () => {
+    const sessions = createMemorySessionStore()
+    await sessions.save('s-26', [
+      { role: 'assistant', content: null, toolCalls: [{ callId: 'c-orphan', toolName: 'browser_click', input: {} }] },
+    ])
+    const harness = createAgentHarness({
+      llm: { complete: async () => ({ type: 'final', output: 'done' }) },
+      sessions,
+      tools: createToolRegistry(),
+      maxSteps: 2,
+    })
+
+    await harness.run({ sessionId: 's-26', input: '新指令', context: {} })
+    const history = await sessions.load('s-26')
+    expect(history.some((m) => m.role === 'assistant' && m.toolCalls?.length)).toBe(false)
+  })
+
+  it('run 时保留完整往返，不清掉已回填的调用', async () => {
+    const sessions = createMemorySessionStore()
+    await sessions.save('s-27', [
+      { role: 'assistant', content: null, toolCalls: [{ callId: 'c-ok', toolName: 'browser_click', input: {} }] },
+      { role: 'tool', content: { ok: true }, callId: 'c-ok' },
+    ])
+    let seen: SessionMessage[] = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          seen = [...request.messages]
+          return { type: 'final', output: 'done' }
+        },
+      },
+      sessions,
+      tools: createToolRegistry(),
+      maxSteps: 2,
+    })
+
+    await harness.run({ sessionId: 's-27', input: '新指令', context: {} })
+    const assistantWithCalls = seen.filter((m) => m.role === 'assistant' && m.toolCalls?.length)
+    expect(assistantWithCalls).toHaveLength(1)
+    expect((assistantWithCalls[0] as { toolCalls?: Array<{ callId: string }> }).toolCalls?.[0]?.callId).toBe('c-ok')
+  })
+
+  it('run 时无残破轮次则不清洗', async () => {
+    const sessions = createMemorySessionStore()
+    await sessions.save('s-28', [{ role: 'user', content: '干净的历史' }])
+    const harness = createAgentHarness({
+      llm: { complete: async () => ({ type: 'final', output: 'done' }) },
+      sessions,
+      tools: createToolRegistry(),
+      maxSteps: 2,
+    })
+
+    await harness.run({ sessionId: 's-28', input: '新指令', context: {} })
+    const history = await sessions.load('s-28')
+    expect(history.some((m) => m.role === 'user' && m.content === '干净的历史')).toBe(true)
+  })
 })
 
 describe('按名选择提示词', () => {

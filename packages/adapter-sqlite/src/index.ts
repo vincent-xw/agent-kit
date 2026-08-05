@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { DatabaseSync } from 'node:sqlite'
 
 import { AgentKitError, createAgentHarness, createLlmClient, createToolRegistry } from '@agent-kit/core'
-import type { AuditLogger, LlmSecret, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
+import type { AuditLogger, LlmSecret, LlmTraceEvent, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
 
 /** 由主密钥派生短密钥版本标识，轮换后旧密文无法通过版本校验。 */
 function deriveKeyVersion(masterKey: string): string {
@@ -120,6 +120,8 @@ export function createSqliteAgentRuntime(options: {
   prompts?: PromptRegistry
   toolTimeoutMs?: number
   audit?: AuditLogger
+  /** LLM 调用级追踪，供 verbose 日志使用。见 createLlmVerboseLogger。 */
+  llmTrace?: (event: LlmTraceEvent) => void
 }) {
   const secrets = createSqliteSecretProvider({ database: options.database, masterKey: options.masterKey })
   const sessions = createSqliteSessionStore(options.database)
@@ -127,7 +129,12 @@ export function createSqliteAgentRuntime(options: {
   const tools = createToolRegistry()
   const harness = createAgentHarness({
     // 每次补全前从 SQLite 读取当前密钥，未配置或版本不匹配时由 SecretProvider 抛稳定错误码。
-    llm: { complete: async (request) => createLlmClient(await secrets.get()).complete(request) },
+    llm: {
+      complete: async (request) => {
+        const secret = await secrets.get()
+        return createLlmClient({ ...secret, ...(options.llmTrace ? { trace: options.llmTrace } : {}) }).complete(request)
+      },
+    },
     sessions,
     tools,
     pendingCalls,
