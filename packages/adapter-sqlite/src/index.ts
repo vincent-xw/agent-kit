@@ -122,6 +122,8 @@ export function createSqliteAgentRuntime(options: {
   audit?: AuditLogger
   /** LLM 调用级追踪，供 verbose 日志使用。见 createLlmVerboseLogger。 */
   llmTrace?: (event: LlmTraceEvent) => void
+  /** LLM 最大重试次数，透传给 createLlmClient。 */
+  llmMaxRetries?: number
 }) {
   const secrets = createSqliteSecretProvider({ database: options.database, masterKey: options.masterKey })
   const sessions = createSqliteSessionStore(options.database)
@@ -132,7 +134,7 @@ export function createSqliteAgentRuntime(options: {
     llm: {
       complete: async (request) => {
         const secret = await secrets.get()
-        return createLlmClient({ ...secret, ...(options.llmTrace ? { trace: options.llmTrace } : {}) }).complete(request)
+        return createLlmClient({ ...secret, ...(options.llmTrace ? { trace: options.llmTrace } : {}), ...(options.llmMaxRetries !== undefined ? { maxRetries: options.llmMaxRetries } : {}) }).complete(request)
       },
     },
     sessions,

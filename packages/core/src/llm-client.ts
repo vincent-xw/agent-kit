@@ -8,6 +8,8 @@ export interface LlmClientConfig {
   model: string
   /** 请求超时毫秒数，默认 30 秒。 */
   timeoutMs?: number
+  /** 最大重试次数（0-5），默认 3。只重试网络错误与 5xx/429，不重试 4xx 参数错误。 */
+  maxRetries?: number
   /**
    * 调试钩子。仅用于 verbose 排障：打印发给 LLM 的完整请求体与收到的原始响应。
    * 默认不注入。开启时会输出 Prompt 正文与模型原文 —— 这是有意为之的调试模式，
@@ -170,12 +172,18 @@ async function readErrorDetail(response: { text(): Promise<string> }): Promise<s
 /** 创建 OpenAI Chat Completions 兼容 HTTP 客户端，统一错误标准化为 AgentKitError。 */
 export function createLlmClient(config: LlmClientConfig): LlmClient {
   const timeoutMs = config.timeoutMs ?? 30_000
+  const maxRetries = Math.max(0, Math.min(5, config.maxRetries ?? 3))
   const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`
   const trace = config.trace
+  /** 判断错误是否值得重试：网络失败与 5xx/429 重试，4xx 不重试。 */
+  function isRetryable(status: number | undefined): boolean {
+    if (status === undefined) return true // 网络层失败，没有 HTTP 状态码
+    return status >= 500 || status === 429
+  }
+
   return {
     async complete(request) {
       const requestId = `llm-${Math.random().toString(36).slice(2, 9)}`
-      const startedAt = Date.now()
       const body: Record<string, unknown> = {
         model: config.model,
         messages: toOpenAiMessages(request),
@@ -186,48 +194,62 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
         ...(request.responseFormatJson ? { response_format: { type: 'json_object' } } : {}),
       }
       trace?.({ requestId, phase: 'request', body, durationMs: 0 })
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), timeoutMs)
-      try {
-        let response: { ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }
+
+      let lastError: AgentKitError | null = null
+      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        const startedAt = Date.now()
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), timeoutMs)
         try {
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              authorization: `Bearer ${config.apiKey}`,
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          })
-        } catch (error) {
-          trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, error })
-          // 网络失败、DNS、超时与 abort 均归一化为稳定的 LLM_RESPONSE_INVALID。
-          throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
+          let response: { ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }
+          try {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                authorization: `Bearer ${config.apiKey}`,
+              },
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            })
+          } catch (error) {
+            trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, error })
+            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
+            if (attempt < maxRetries) continue
+            throw lastError
+          }
+          if (!response.ok) {
+            const detail = await readErrorDetail(response)
+            trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, responseBody: { status: response.status, detail } })
+            lastError = new AgentKitError(
+              'LLM_RESPONSE_INVALID',
+              `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`,
+            )
+            // 4xx（参数错误、模型不存在等）重试也是同样结果，直接抛出。
+            if (!isRetryable(response.status) || attempt >= maxRetries) throw lastError
+            continue
+          }
+          let payload: unknown
+          try {
+            payload = await response.json()
+          } catch {
+            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应不是有效 JSON')
+            if (attempt < maxRetries) continue
+            throw lastError
+          }
+          trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+          const result = extractResult(payload)
+          if (!result) {
+            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
+            if (attempt < maxRetries) continue
+            throw lastError
+          }
+          return result
+        } finally {
+          clearTimeout(timer)
         }
-        if (!response.ok) {
-          // 端点的错误正文才是唯一能说明「为什么 400」的信息（模型名不对、
-          // tools 结构不合法、上下文超长…）。丢掉它就只剩一个无从下手的状态码。
-          const detail = await readErrorDetail(response)
-          trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, responseBody: { status: response.status, detail } })
-          throw new AgentKitError(
-            'LLM_RESPONSE_INVALID',
-            `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`,
-          )
-        }
-        let payload: unknown
-        try {
-          payload = await response.json()
-        } catch {
-          throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应不是有效 JSON')
-        }
-        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
-        const result = extractResult(payload)
-        if (!result) throw new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
-        return result
-      } finally {
-        clearTimeout(timer)
       }
+      throw lastError ?? new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败（重试耗尽）')
     },
   }
 }
