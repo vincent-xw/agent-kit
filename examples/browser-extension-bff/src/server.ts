@@ -77,7 +77,7 @@ async function seedSecret(runtime: { secrets: { put(secret: LlmSecret): Promise<
 }
 
 /** 用 Node 原生 http 启动 BFF，避免引入第三方服务器适配器。 */
-export function startServer(options: { masterKey: string; apiToken: string; port?: number; llm?: LlmSecret; llmMaxRetries?: number; llmTrace?: (event: LlmTraceEvent) => void }) {
+export function startServer(options: { masterKey: string; apiToken: string; port?: number; llm?: LlmSecret; llmMaxRetries?: number; llmTrace?: (event: LlmTraceEvent) => void; databasePath?: string }) {
   const { app, ready } = createBrowserExtensionBff(options)
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // 密钥写入是异步的；先等它完成再处理请求，避免首个请求撞上 SECRET_NOT_CONFIGURED。
