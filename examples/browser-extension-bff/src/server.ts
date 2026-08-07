@@ -1,6 +1,9 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
+import { readFileSync, existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
@@ -108,34 +111,118 @@ function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-// 直接运行时启动（node dist/server.js），被测试或库方式导入时不自动监听端口。
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * 从 exe/脚本 同目录的 .env 文件加载配置。
+ *
+ * 打包成 exe 后用户无法用 `set AGENT_KIT_MASTER_KEY=xxx` 逐个设环境变量，
+ * 也不方便用 `--env-file`（exe 没有这个 flag）。所以在启动入口处手动读 .env，
+ * 把 key=value 注入 process.env，已有的环境变量优先（命令行设置不被文件覆盖）。
+ *
+ * .env 文件格式：每行 `KEY=VALUE`，# 开头是注释，空行忽略。
+ */
+function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
+  const dir = dirname(process.execPath)
+  const envPath = join(dir, '.env')
+  if (!existsSync(envPath)) return { loaded: false, path: envPath, vars: [] }
+  const content = readFileSync(envPath, 'utf-8')
+  const loaded: string[] = []
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIndex = trimmed.indexOf('=')
+    if (eqIndex <= 0) continue
+    const key = trimmed.slice(0, eqIndex).trim()
+    const value = trimmed.slice(eqIndex + 1).trim().replace(/^["']|["']$/g, '')
+    if (process.env[key] === undefined) {
+      process.env[key] = value
+      loaded.push(key)
+    }
+  }
+  return { loaded: true, path: envPath, vars: loaded }
+}
+
+/** 生成配置文件模板（首次启动时如果 .env 不存在则写入）。 */
+function ensureEnvTemplate(): void {
+  const dir = dirname(process.execPath)
+  const envPath = join(dir, '.env')
+  if (existsSync(envPath)) return
+  const template = [
+    '# BFF 配置文件。填好后启动 exe 即可。',
+    '# 井号开头是注释，不用管。',
+    '',
+    '# 32 字节 base64url 主密钥。用于加解密 SQLite 中的模型密钥。',
+    "# 生成方法：在终端运行 openssl rand -base64 32 然后把 + 换成 -、/ 换成 _、去掉末尾 =",
+    'AGENT_KIT_MASTER_KEY=',
+    '',
+    '# 扩展访问 BFF 的接入凭证（不是 LLM API Key）。',
+    '# 随便取一个字符串，需与扩展设置里的「BFF 接入 token」一致。',
+    'BFF_API_TOKEN=dev-token',
+    '',
+    '# 模型配置。只存在于 BFF 进程环境，扩展侧看不到。',
+    'LLM_API_KEY=',
+    'LLM_MODEL=deepseek-v4-flash',
+    '',
+    '# OpenAI 兼容端点。DeepSeek 用 https://api.deepseek.com',
+    '# 火山方舟用 https://ark.cn-beijing.volces.com/api/v3',
+    'LLM_BASE_URL=https://api.deepseek.com',
+    '',
+    '# 日志级别：info（默认）或 verbose（打印 LLM 完整输入输出，排障用）',
+    '# LOG_LEVEL=verbose',
+    '',
+    '# LLM 请求失败重试次数（0-5，默认 3）',
+    '# LLM_MAX_RETRIES=3',
+    '',
+    '# 监听端口（默认 8787）',
+    '# PORT=8787',
+    '',
+  ].join('\n')
+  try {
+    const { writeFileSync } = require('node:fs')
+    writeFileSync(envPath, template, 'utf-8')
+    console.log(`[bff] 已生成配置文件模板：${envPath}`)
+    console.log('[bff] 请填写后重新启动。')
+    process.exit(0)
+  } catch {
+    // 写不了也不阻塞 -- 用户可能手动建 .env。
+  }
+}
+
+// 直接运行时启动（node dist/server.js 或 pkg 打包的 exe），被测试或库方式导入时不自动监听端口。
+if (process.argv[1] && (import.meta.url === `file://${process.argv[1]}` || process.execPath === process.argv[0])) {
+  // 首次启动：如果同目录没有 .env，生成模板并退出，引导用户填写。
+  ensureEnvTemplate()
+  // 从 .env 文件加载配置（已有的环境变量优先）。
+  const envResult = loadEnvFile()
+  if (envResult.loaded) {
+    console.log(`[bff] 已从 ${envResult.path} 加载配置：${envResult.vars.join(', ')}`)
+  }
   const masterKey = process.env.AGENT_KIT_MASTER_KEY ?? ''
   const apiToken = process.env.BFF_API_TOKEN ?? ''
   if (!masterKey || !apiToken) {
-    console.error('缺少环境变量：AGENT_KIT_MASTER_KEY（32 字节 base64url）与 BFF_API_TOKEN')
+    console.error('缺少配置：AGENT_KIT_MASTER_KEY 与 BFF_API_TOKEN')
+    console.error('请在 exe 同目录的 .env 文件中填写，或通过环境变量设置。')
     process.exit(1)
   }
-  // 模型配置：默认指向火山方舟的 OpenAI 兼容端点。
   const apiKey = process.env.LLM_API_KEY ?? ''
-  const baseUrl = process.env.LLM_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3'
+  const baseUrl = process.env.LLM_BASE_URL ?? 'https://api.deepseek.com'
   const model = process.env.LLM_MODEL ?? ''
   if (!apiKey || !model) {
-    console.error('缺少环境变量：LLM_API_KEY 与 LLM_MODEL（可选 LLM_BASE_URL，默认火山方舟）')
+    console.error('缺少配置：LLM_API_KEY 与 LLM_MODEL')
+    console.error('请在 exe 同目录的 .env 文件中填写，或通过环境变量设置。')
     process.exit(1)
   }
-  // LOG_LEVEL=verbose 时打印每次 LLM 调用的完整输入输出（含 Prompt 正文与模型原文）。
-  // 这是有意越界的调试模式，只应在排查问题时临时开启。
   const logLevel = process.env.LOG_LEVEL ?? 'info'
   const llmTrace =
     logLevel === 'verbose'
       ? createLlmVerboseLogger({ prefix: '[bff:llm]' })
       : undefined
-  if (logLevel === 'verbose') console.log('[bff] LOG_LEVEL=verbose —— 将打印 LLM 请求与响应的完整内容（含 Prompt 正文）')
+  if (logLevel === 'verbose') console.log('[bff] LOG_LEVEL=verbose -- 将打印 LLM 请求与响应的完整内容（含 Prompt 正文）')
   const llmMaxRetries = Number(process.env.LLM_MAX_RETRIES ?? '3')
+  const port = Number(process.env.PORT ?? '8787')
+  const dbPath = join(dirname(process.execPath), 'agent-kit.sqlite')
   if (llmTrace) {
-    startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmTrace, llmMaxRetries })
+    startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmTrace, llmMaxRetries, port, databasePath: dbPath })
   } else {
-    startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmMaxRetries })
+    startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmMaxRetries, port, databasePath: dbPath })
   }
 }
