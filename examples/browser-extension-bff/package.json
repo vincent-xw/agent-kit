@@ -19,12 +19,20 @@
     "predev": "pnpm --filter @agent-kit/core --filter @agent-kit/bff-hono --filter @agent-kit/adapter-sqlite build",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput & node --watch --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bundle": "pnpm build && node build.mjs",
+    "pkg": "pnpm bundle && npx pkg dist/server.bundle.cjs --targets node22-macos-arm64,node22-macos-x64,node22-win-x64 --out-path dist/pkg",
+    "pkg:macos": "pnpm bundle && npx pkg dist/server.bundle.cjs --targets node22-macos-arm64,node22-macos-x64 --out-path dist/pkg",
+    "pkg:win": "pnpm bundle && npx pkg dist/server.bundle.cjs --targets node22-win-x64 --out-path dist/pkg"
   },
   "dependencies": {
     "@agent-kit/adapter-sqlite": "workspace:*",
     "@agent-kit/bff-hono": "workspace:*",
     "@agent-kit/core": "workspace:*",
     "zod": "3.24.4"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.0.0",
+    "esbuild": "^0.25.0"
   }
 }

@@ -1,9 +1,34 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+/**
+ * 获取程序所在目录。
+ *
+ * node 直跑时用 __filename（CJS bundle）或 import.meta.url（ESM）的目录；
+ * pkg 打包后 __filename 指向虚拟 FS（/snapshot/...），此时用 process.execPath 的目录。
+ */
+function getProgramDir(): string {
+  // CJS bundle 里有 __filename
+  if (typeof __filename !== 'undefined') {
+    const dir = dirname(__filename)
+    // pkg 虚拟 FS 路径以 /snapshot/ 开头，此时 fallback 到 execPath
+    if (!dir.startsWith('/snapshot')) return dir
+  }
+  // ESM 模式
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return dirname(fileURLToPath(import.meta.url))
+    }
+  } catch {
+    // import.meta 不可用时 fallback
+  }
+  // pkg 打包的 exe：execPath 就是 exe 本身
+  return dirname(process.execPath)
+}
 
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
@@ -121,7 +146,7 @@ function readBody(req: IncomingMessage): Promise<string> {
  * .env 文件格式：每行 `KEY=VALUE`，# 开头是注释，空行忽略。
  */
 function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
-  const dir = dirname(process.execPath)
+  const dir = getProgramDir()
   const envPath = join(dir, '.env')
   if (!existsSync(envPath)) return { loaded: false, path: envPath, vars: [] }
   const content = readFileSync(envPath, 'utf-8')
@@ -143,7 +168,7 @@ function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
 
 /** 生成配置文件模板（首次启动时如果 .env 不存在则写入）。 */
 function ensureEnvTemplate(): void {
-  const dir = dirname(process.execPath)
+  const dir = getProgramDir()
   const envPath = join(dir, '.env')
   if (existsSync(envPath)) return
   const template = [
@@ -177,7 +202,6 @@ function ensureEnvTemplate(): void {
     '',
   ].join('\n')
   try {
-    const { writeFileSync } = require('node:fs')
     writeFileSync(envPath, template, 'utf-8')
     console.log(`[bff] 已生成配置文件模板：${envPath}`)
     console.log('[bff] 请填写后重新启动。')
@@ -188,7 +212,11 @@ function ensureEnvTemplate(): void {
 }
 
 // 直接运行时启动（node dist/server.js 或 pkg 打包的 exe），被测试或库方式导入时不自动监听端口。
-if (process.argv[1] && (import.meta.url === `file://${process.argv[1]}` || process.execPath === process.argv[0])) {
+// 判断逻辑：pkg 打包后 process.execPath === process.argv[0]；node 直跑时用 __filename（CJS bundle）或 import.meta.url（ESM）。
+const isMainModule = process.execPath === process.argv[0] ||
+  (typeof __filename !== 'undefined' && process.argv[1] === __filename) ||
+  (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}`)
+if (process.argv[1] && isMainModule) {
   // 首次启动：如果同目录没有 .env，生成模板并退出，引导用户填写。
   ensureEnvTemplate()
   // 从 .env 文件加载配置（已有的环境变量优先）。
@@ -219,7 +247,7 @@ if (process.argv[1] && (import.meta.url === `file://${process.argv[1]}` || proce
   if (logLevel === 'verbose') console.log('[bff] LOG_LEVEL=verbose -- 将打印 LLM 请求与响应的完整内容（含 Prompt 正文）')
   const llmMaxRetries = Number(process.env.LLM_MAX_RETRIES ?? '3')
   const port = Number(process.env.PORT ?? '8787')
-  const dbPath = join(dirname(process.execPath), 'agent-kit.sqlite')
+  const dbPath = join(getProgramDir(), 'agent-kit.sqlite')
   if (llmTrace) {
     startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmTrace, llmMaxRetries, port, databasePath: dbPath })
   } else {
