@@ -7,11 +7,13 @@ export type ToolCall = { callId: string; toolName: string; input: unknown }
  * LLM 单次完成的输出：最终文本，或本轮全部工具调用。
  * 复数形态是必需的——模型可以在一轮内发起多个调用，只取第一个会静默丢弃其余调用。
  */
-export type LlmResult = { type: 'final'; output: unknown } | { type: 'tool_calls'; calls: ToolCall[] }
+export type LlmResult =
+  | { type: 'final'; output: unknown; reasoning?: string }
+  | { type: 'tool_calls'; calls: ToolCall[]; reasoning?: string }
 
 /** Harness 对外结果：最终输出，或需要远端 Tool Host 执行的挂起调用集合。 */
 export type HarnessResult =
-  | { type: 'final'; output: unknown }
+  | { type: 'final'; output: unknown; reasoning?: string }
   | { type: 'pending_tool_calls'; calls: Array<{ callId: string; toolName: string; input: unknown }> }
 
 /**

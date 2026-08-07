@@ -118,8 +118,12 @@ function extractResult(payload: unknown): LlmResult | null {
   if (typeof payload !== 'object' || payload === null) return null
   const record = payload as { choices?: unknown }
   if (!Array.isArray(record.choices) || record.choices.length === 0) return null
-  const message = (record.choices[0] as { message?: { content?: unknown; tool_calls?: unknown } } | undefined)?.message
+  const message = (record.choices[0] as { message?: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown } } | undefined)?.message
   if (!message) return null
+  // DeepSeek 等模型在 message.reasoning_content 里返回思考链，透传给 UI 展示。
+  const reasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.trim()
+    ? message.reasoning_content
+    : undefined
   const toolCalls = message.tool_calls
   if (Array.isArray(toolCalls) && toolCalls.length > 0) {
     const calls: ToolCall[] = []
@@ -128,9 +132,9 @@ function extractResult(payload: unknown): LlmResult | null {
       if (!parsed) return null
       calls.push(parsed)
     }
-    return { type: 'tool_calls', calls }
+    return { type: 'tool_calls', calls, ...(reasoning ? { reasoning } : {}) }
   }
-  return { type: 'final', output: typeof message.content === 'string' ? message.content : '' }
+  return { type: 'final', output: typeof message.content === 'string' ? message.content : '', ...(reasoning ? { reasoning } : {}) }
 }
 
 /**

@@ -33,7 +33,7 @@ export function createAgentBff(options: {
         audit(requestId, 'run', startedAt, 'UNAUTHORIZED')
         return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
       }
-      const body = await context.req.json<{ input?: unknown; context?: unknown; promptName?: unknown }>()
+      const body = await context.req.json<{ input?: unknown; context?: unknown; promptName?: unknown; skipTools?: unknown }>()
       if (typeof body.input !== 'string' || !body.input.trim() || !body.context || typeof body.context !== 'object' || Array.isArray(body.context)) {
         audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: '请求参数不合法' }, 400)
@@ -42,6 +42,10 @@ export function createAgentBff(options: {
         audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: 'promptName 必须是字符串' }, 400)
       }
+      if (body.skipTools !== undefined && typeof body.skipTools !== 'boolean') {
+        audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
+        return context.json({ code: 'REQUEST_INVALID', requestId, message: 'skipTools 必须是布尔值' }, 400)
+      }
       // 把已认证主体绑定到 session namespace，防止跨用户读取同一 sessionId 的上下文。
       const scopedSessionId = `${identity.subject}:${context.req.param('sessionId')}`
       const result = await options.harness.run({
@@ -49,6 +53,7 @@ export function createAgentBff(options: {
         input: body.input,
         context: body.context as Record<string, unknown>,
         ...(body.promptName ? { promptName: body.promptName } : {}),
+        ...(body.skipTools === true ? { skipTools: true } : {}),
       })
       audit(requestId, `run:${result.type}`, startedAt)
       return context.json(result)

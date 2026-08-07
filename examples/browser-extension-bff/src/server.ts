@@ -13,6 +13,8 @@ import {
   candidateAssessmentPrompt,
   candidateAssessmentProtocol,
   freeFormPrompt,
+  planningPrompt,
+  planningProtocol,
 } from './browser-tools.js'
 
 /** 装配浏览器扩展专属 BFF：SQLite 密钥库 + Bearer 鉴权 + harness HTTP 边界。 */
@@ -35,6 +37,7 @@ export function createBrowserExtensionBff(options: {
   // free-form 先注册因此成为默认提示词：调试期的主用途是用户下自由指令。
   // 另两个按名选择（harness.run 的 promptName）。
   prompts.register({ name: 'free-form', version: '1', prompt: freeFormPrompt })
+  prompts.register({ name: 'planning', version: '1', prompt: planningPrompt, protocol: planningProtocol })
   prompts.register({ name: 'browser-automation', version: '1', prompt: browserAutomationPrompt })
   prompts.register({
     name: 'candidate-assessment',

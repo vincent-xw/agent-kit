@@ -201,6 +201,25 @@ export const browserToolDefinitions: ToolDefinition[] = [
       height: z.number(),
     }),
   },
+  {
+    name: 'browser_go_back',
+    execution: 'remote',
+    description:
+      '浏览器返回上一页。当写操作（尤其是点击链接）把你带到了非预期的页面——例如下载链接跳到了外部站点——时用它回到原页面继续任务。返回结果会包含 navigation 字段说明回到了哪里。这是写操作，会改变浏览历史。',
+    input: z.object({}),
+    output: z.object({
+      ok: z.boolean(),
+      message: z.string(),
+      navigation: z
+        .object({
+          from: z.string(),
+          to: z.string(),
+          changedDomain: z.boolean(),
+          note: z.string(),
+        })
+        .optional(),
+    }),
+  },
 ]
 
 /** 候选人评估的输出协议，替代原扩展侧的手工 JSON 解析与容错。 */
@@ -238,9 +257,15 @@ export const freeFormPrompt = [
   '工作方式：',
   '1. 先调用 browser_snapshot 看清页面上有哪些可交互元素。不要凭猜测写 CSS 选择器。',
   '2. 用快照返回的 ref 指定操作目标（browser_click({ref: 5})）。扩展会按 ref 取当前坐标，你不必关心坐标是否过期。',
-  '3. 每次只执行一个写动作（click / input_text / press_key / scroll）。',
+  '3. 每次只执行一个写动作（click / input_text / press_key / scroll / go_back）。',
   '4. 动作之后用 browser_verify 确认页面真的变了。命令返回 ok 不等于动作生效。',
   '5. 页面发生变化后（点击、滚动、导航、弹窗出现）重新 browser_snapshot —— 旧 ref 可能已失效。',
+  '',
+  '导航偏离处理（重要）：',
+  '- 点击链接、按回车等写动作可能导致页面跳转到新地址。动作返回值里如果带 navigation 字段，说明发生了导航，务必读它。',
+  '- navigation.changedDomain 为真表示你离开了原来的域名。如果这不是用户预期的跳转（例如下载链接把你带到了 GitHub 等外部站点），立即调用 browser_go_back 回到原页面，不要在错误的页面上继续操作。',
+  '- 在未授权的域名上写操作会被拒绝。遇到这种情况不要停止任务，调用 browser_go_back 回到已授权的页面继续。',
+  '- go_back 返回后用 browser_snapshot 确认回到了预期页面，再继续。',
   '',
   '注意事项：',
   '- 快照返回 occluded 为真的元素不要直接点击，先处理遮挡（关闭浮层或滚动）。',
@@ -248,9 +273,73 @@ export const freeFormPrompt = [
   '- ref 失效（stale）时不要重试同一个 ref，重新快照取新的。',
   '- 用户的写操作可能需要本人逐个批准，被拒绝时不要绕道重试，直接说明该动作未获批准。',
   '- 某些域名与路径不在允许范围内，写操作会被拒绝。遇到这种情况说明原因，不要尝试其他方式。',
+  '- 不要假装自己还在原页面上操作 —— 如果页面已经导航，你必须根据 navigation 提示或重新快照来确认当前位置。',
   '',
   '完成后用简洁的中文说明你做了什么、结果如何。若中途失败，说明失败在哪一步、观测到什么。',
 ].join('\n')
+
+/**
+ * 计划阶段提示词。
+ *
+ * 在执行前让模型评估任务可行性并输出结构化计划。不带 tools，模型只能输出文本。
+ * context 里会带页面快照，模型据此判断当前页面是否足够支撑任务。
+ */
+export const planningPrompt = [
+  '你是一个浏览器自动化任务的规划助手。用户会用自然语言描述想做的事，你的职责是评估可行性并输出执行计划。',
+  '',
+  '你会收到当前页面的快照信息（在 context 字段里），包含页面 URL、标题和可交互元素列表。',
+  '结合快照信息和用户的任务描述，输出一个结构化的执行计划。',
+  '',
+  '输出格式（严格 JSON）：',
+  '{',
+  '  "feasible": true/false,',
+  '  "confidence": "high" | "medium" | "low",',
+  '  "summary": "一句话总结这个任务要做什么",',
+  '  "steps": [',
+  '    { "action": "步骤描述", "tool": "工具名", "write": true/false, "note": "风险或注意事项" }',
+  '  ],',
+  '  "risks": ["风险点1", "风险点2"],',
+  '  "cannotDo": ["做不到的部分1", "做不到的部分2"]',
+  '}',
+  '',
+  '可用工具：',
+  '- browser_snapshot: 快照页面可交互元素',
+  '- browser_read_page: 读取页面标题/URL/正文',
+  '- browser_locate_element: 定位元素取坐标',
+  '- browser_click: 真实点击（写操作）',
+  '- browser_input_text: 输入文本（写操作）',
+  '- browser_press_key: 按键（写操作）',
+  '- browser_scroll: 滚动（写操作）',
+  '- browser_go_back: 返回上一页（写操作）',
+  '- browser_verify: 验证动作是否生效',
+  '- browser_screenshot: 截图',
+  '',
+  '评估要点：',
+  '- 当前页面上有没有完成任务所需的元素？如果没有，任务可能不可行。',
+  '- 是否需要导航到其他域名？如果是，标注风险（未授权域名写操作会被拒绝）。',
+  '- 是否需要大量重复操作？如果是，评估步骤数是否合理。',
+  '- 如果任务无法完成，feasible 设为 false，在 cannotDo 里说明原因和建议。',
+  '- 如果任务简单且高置信度，confidence 设为 high，steps 可以简短。',
+  '',
+  '不要执行任何操作，只分析和规划。输出严格 JSON，不要 markdown。',
+].join('\n')
+
+/** 计划输出的 Zod 协议。 */
+export const planningProtocol = z.object({
+  feasible: z.boolean(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  summary: z.string(),
+  steps: z.array(
+    z.object({
+      action: z.string(),
+      tool: z.string(),
+      write: z.boolean(),
+      note: z.string().optional(),
+    }),
+  ),
+  risks: z.array(z.string()),
+  cannotDo: z.array(z.string()),
+})
 
 /**
  * 浏览器自动化系统提示词（BOSS 直聘预设流程专用）。

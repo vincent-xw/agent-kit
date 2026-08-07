@@ -42,6 +42,8 @@ export interface AgentHarness {
     context: Record<string, unknown>
     /** 指定使用哪个已注册提示词；省略时用默认（首个注册）提示词。 */
     promptName?: string
+    /** 跳过工具声明：不发 tools 字段，模型只能输出文本。用于计划阶段。 */
+    skipTools?: boolean
   }): Promise<HarnessResult>
   /** 回填远端 Tool Host 执行结果并继续循环。 */
   resume(request: { sessionId: string; callId: string; output: unknown }): Promise<HarnessResult>
@@ -144,6 +146,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
     context: Record<string, unknown>,
     history: SessionMessage[],
     promptName?: string,
+    skipTools?: boolean,
   ): Promise<HarnessResult> {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
     // 本次用户输入在首轮发出后即并入历史，避免后续轮次重复追加。
@@ -151,7 +154,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
     for (let step = 0; step < deps.maxSteps; step += 1) {
       const startedAt = Date.now()
       const prompt = resolvePrompt(promptName)
-      const toolSchemas = toToolSchemas(deps.tools.list())
+      const toolSchemas = skipTools ? [] : toToolSchemas(deps.tools.list())
       // LLM 调用失败时也要留一笔审计，否则服务端只看到请求进来、没有任何后续痕迹。
       let result: LlmResult
       try {
@@ -181,7 +184,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         const output = applyOutputProtocol(result.output, promptName)
         history.push({ role: 'assistant', content: result.output })
         await deps.sessions.save(sessionId, history)
-        return { type: 'final', output }
+        return { type: 'final', output, ...(result.reasoning ? { reasoning: result.reasoning } : {}) }
       }
 
       // assistant 轮次必须入库：否则模型看不到自己发起过哪些调用，工具结果就成了无主消息。
@@ -282,7 +285,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         await deps.sessions.save(request.sessionId, sanitized)
         history = sanitized
       }
-      return runLoop(request.sessionId, request.input, request.context, history, request.promptName)
+      return runLoop(request.sessionId, request.input, request.context, history, request.promptName, request.skipTools)
     },
     async resume(request) {
       const pending = await pendingCalls.get(request.callId)

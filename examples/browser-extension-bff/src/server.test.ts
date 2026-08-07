@@ -203,7 +203,7 @@ describe('浏览器工具定义', () => {
     expect(browserToolDefinitions.every((tool) => tool.execute === undefined)).toBe(true)
   })
 
-  it('覆盖闭环所需的 9 个工具', () => {
+  it('覆盖闭环所需的全部工具', () => {
     expect(browserToolDefinitions.map((tool) => tool.name)).toEqual([
       'browser_snapshot',
       'browser_read_page',
@@ -214,6 +214,7 @@ describe('浏览器工具定义', () => {
       'browser_scroll',
       'browser_verify',
       'browser_screenshot',
+      'browser_go_back',
     ])
   })
 
