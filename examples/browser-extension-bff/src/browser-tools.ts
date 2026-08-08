@@ -220,6 +220,23 @@ export const browserToolDefinitions: ToolDefinition[] = [
         .optional(),
     }),
   },
+  {
+    name: 'browser_save_file',
+    execution: 'remote',
+    description:
+      '生成文件供用户下载。当任务需要把收集到的数据导出时调用此工具--例如汇总候选人信息生成 xlsx、把分析结果导出为 csv。文件生成后会在对话区域出现下载按钮，用户点击即可下载。这是只读操作（不改变页面状态），不需要审批。',
+    input: z.object({
+      filename: z.string().describe('文件名（不含扩展名），例如「候选人汇总」'),
+      format: z.enum(['txt', 'csv', 'xlsx', 'json']).describe('文件格式。xlsx 适合表格数据，csv 适合纯数据，json 适合结构化数据，txt 适合纯文本'),
+      content: z.string().describe('文件内容。如果是 JSON 数组字符串（如 \'[{"姓名":"张三","技能":"Vue"}]\'），csv 和 xlsx 会自动按字段做表头和行列。否则按纯文本处理。'),
+    }),
+    output: z.object({
+      ok: z.boolean(),
+      message: z.string(),
+      fileId: z.string().optional().describe('生成文件的标识，用于 UI 展示下载按钮'),
+      filename: z.string().optional().describe('生成的完整文件名（含扩展名）'),
+    }),
+  },
 ]
 
 /** 候选人评估的输出协议，替代原扩展侧的手工 JSON 解析与容错。 */
@@ -274,6 +291,12 @@ export const freeFormPrompt = [
   '- 用户的写操作可能需要本人逐个批准，被拒绝时不要绕道重试，直接说明该动作未获批准。',
   '- 某些域名与路径不在允许范围内，写操作会被拒绝。遇到这种情况说明原因，不要尝试其他方式。',
   '- 不要假装自己还在原页面上操作 —— 如果页面已经导航，你必须根据 navigation 提示或重新快照来确认当前位置。',
+  '',
+  '',
+  '数据导出：',
+  '- 当用户需要把收集到的数据导出时，调用 browser_save_file 生成文件。支持 txt/csv/xlsx/json 格式。',
+  '- content 参数传 JSON 数组字符串，csv 和 xlsx 会自动按字段做表头和行列。',
+  '- 文件生成后用户会在对话区域看到下载按钮，你不需要做其他操作，只需告知用户文件已生成。',
   '',
   '完成后用简洁的中文说明你做了什么、结果如何。若中途失败，说明失败在哪一步、观测到什么。',
 ].join('\n')

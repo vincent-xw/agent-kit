@@ -213,10 +213,11 @@ function ensureEnvTemplate(): void {
 
 // 直接运行时启动（node dist/server.js 或 pkg 打包的 exe），被测试或库方式导入时不自动监听端口。
 // 判断逻辑：pkg 打包后 process.execPath === process.argv[0]；node 直跑时用 __filename（CJS bundle）或 import.meta.url（ESM）。
+// 注意：vitest 等测试运行器也会设置 process.argv[1]，所以额外检查 import.meta.url 或 __filename 必须精确匹配入口文件。
 const isMainModule = process.execPath === process.argv[0] ||
-  (typeof __filename !== 'undefined' && process.argv[1] === __filename) ||
-  (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}`)
-if (process.argv[1] && isMainModule) {
+  (typeof __filename !== 'undefined' && process.argv[1] === __filename && !process.env.VITEST) ||
+  (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}` && !process.env.VITEST)
+if (process.argv[1] && isMainModule && !process.env.VITEST) {
   // 首次启动：如果同目录没有 .env，生成模板并退出，引导用户填写。
   ensureEnvTemplate()
   // 从 .env 文件加载配置（已有的环境变量优先）。

@@ -215,6 +215,7 @@ describe('浏览器工具定义', () => {
       'browser_verify',
       'browser_screenshot',
       'browser_go_back',
+      'browser_save_file',
     ])
   })
 
