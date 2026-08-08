@@ -191,7 +191,7 @@ export const browserToolDefinitions: ToolDefinition[] = [
   {
     name: 'browser_screenshot',
     execution: 'remote',
-    description: '截取当前视口。用于在快照信息不足、或反复定位失败时观察页面实际状态。',
+    description: '截取当前视口的截图。截图会自动展示在对话区域，用户可以点击查看大图或下载。适合用于：1) 观察页面实际状态辅助定位 2) 为报告/周报等产出配图。截图对用户可见，不需要额外操作。',
     input: z.object({
       format: z.enum(['png', 'jpeg']).optional(),
     }),
