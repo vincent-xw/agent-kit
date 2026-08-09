@@ -237,6 +237,40 @@ export const browserToolDefinitions: ToolDefinition[] = [
       filename: z.string().optional().describe('生成的完整文件名（含扩展名）'),
     }),
   },
+  {
+    name: 'browser_read_file',
+    execution: 'remote',
+    description:
+      '从扩展的持久化存储（IndexedDB）读取文本文件。用户上传的文件和之前会话写入的文件都在这里，跨会话可用。返回文件文本内容。大文件会自动截断（前 50000 字符），如需更多请分段处理。不改变页面状态，不需要审批。',
+    input: z.object({
+      name: z.string().describe('文件名（含扩展名），如「候选人名单.csv」或「分析结果.json」。可用文件列表在上下文的 fileList 字段里。'),
+    }),
+    output: z.object({
+      ok: z.boolean(),
+      name: z.string().optional(),
+      content: z.string().optional().describe('文件文本内容'),
+      size: z.number().optional(),
+      truncated: z.boolean().optional().describe('文件是否被截断'),
+      totalLength: z.number().optional().describe('文件总字符数（截断时有用）'),
+      message: z.string(),
+    }),
+  },
+  {
+    name: 'browser_write_file',
+    execution: 'remote',
+    description:
+      '将文本内容写入扩展的持久化存储（IndexedDB）。写入的文件跨会话可用，下次会话可直接读取，无需重传。适合保存中间结果、加工后的数据、分步处理的中间文件。只支持文本（txt/csv/json/md 等），不支持二进制。不改变页面状态，不需要审批。',
+    input: z.object({
+      name: z.string().describe('文件名（含扩展名），如「分类结果.csv」或「中间数据.json」'),
+      content: z.string().describe('文件文本内容。JSON 数据直接传 JSON 字符串，表格数据用 CSV 格式。'),
+    }),
+    output: z.object({
+      ok: z.boolean(),
+      name: z.string().optional(),
+      size: z.number().optional(),
+      message: z.string(),
+    }),
+  },
 ]
 
 /** 候选人评估的输出协议，替代原扩展侧的手工 JSON 解析与容错。 */
@@ -297,6 +331,12 @@ export const freeFormPrompt = [
   '- 当用户需要把收集到的数据导出时，调用 browser_save_file 生成文件。支持 txt/csv/xlsx/json 格式。',
   '- content 参数传 JSON 数组字符串，csv 和 xlsx 会自动按字段做表头和行列。',
   '- 文件生成后用户会在对话区域看到下载按钮，你不需要做其他操作，只需告知用户文件已生成。',
+  '',
+  '文件操作：',
+  '- 上下文里的 fileList 列出了用户已上传的持久化文件。需要读取时调用 browser_read_file({ name })。',
+  '- 需要保存中间结果或加工后的数据时，调用 browser_write_file({ name, content })。保存的文件跨会话可用。',
+  '- 表格数据用 CSV 格式存储和交换，不要用 xlsx（xlsx 只在最终导出下载时用 browser_save_file 生成）。',
+  '- 大文件会被截断，如需完整内容请分段读取或分段处理。',
   '',
   '完成后用简洁的中文说明你做了什么、结果如何。若中途失败，说明失败在哪一步、观测到什么。',
 ].join('\n')
