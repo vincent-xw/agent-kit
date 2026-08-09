@@ -11,3 +11,4 @@ coverage/
 *.sqlite-shm
 *.sqlite-wal
 .pnpm-store/
+.pkg-cache/
