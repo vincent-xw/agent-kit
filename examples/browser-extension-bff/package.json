@@ -21,9 +21,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "bundle": "pnpm build && node build.mjs",
-    "pkg": "PKG_CACHE_PATH=./.pkg-cache pnpm bundle && PKG_CACHE_PATH=./.pkg-cache npx pkg dist/server.bundle.cjs --targets node22-macos-arm64,node22-macos-x64,node22-win-x64 --out-path dist/pkg",
-    "pkg:macos": "PKG_CACHE_PATH=./.pkg-cache pnpm bundle && PKG_CACHE_PATH=./.pkg-cache npx pkg dist/server.bundle.cjs --targets node22-macos-arm64,node22-macos-x64 --out-path dist/pkg",
-    "pkg:win": "PKG_CACHE_PATH=./.pkg-cache pnpm bundle && PKG_CACHE_PATH=./.pkg-cache npx pkg dist/server.bundle.cjs --targets node22-win-x64 --out-path dist/pkg",
+    "pkg": "PKG_CACHE_PATH=./.pkg-cache pnpm bundle && PKG_CACHE_PATH=./.pkg-cache npx pkg dist/server.bundle.cjs --targets node22-macos-arm64,node22-macos-x64,node22-win-x64 --no-bytecode --public --out-path dist/pkg",
+    "pkg:macos": "PKG_CACHE_PATH=./.pkg-cache pnpm bundle && PKG_CACHE_PATH=./.pkg-cache npx pkg dist/server.bundle.cjs --targets node22-macos-arm64,node22-macos-x64 --no-bytecode --public --out-path dist/pkg",
+    "pkg:win": "PKG_CACHE_PATH=./.pkg-cache pnpm bundle && PKG_CACHE_PATH=./.pkg-cache npx pkg dist/server.bundle.cjs --targets node22-win-x64 --no-bytecode --public --out-path dist/pkg",
     "pkg:proxy": "echo '用法: HTTPS_PROXY=http://127.0.0.1:7890 pnpm pkg' && HTTPS_PROXY=${HTTPS_PROXY:-http://127.0.0.1:7890} PKG_CACHE_PATH=./.pkg-cache pnpm pkg"
   },
   "dependencies": {
