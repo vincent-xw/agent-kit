@@ -12,3 +12,4 @@ coverage/
 *.sqlite-wal
 .pnpm-store/
 .pkg-cache/
+.DS_Store
