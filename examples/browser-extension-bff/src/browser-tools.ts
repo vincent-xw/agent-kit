@@ -382,7 +382,7 @@ export const freeFormPrompt = [
   '搜索与筛选输入框（重要）：',
   '- 很多检索框没有「搜索」按钮。它们的触发方式有两种：(a) 监听值变化、停止输入后自动检索；(b) 等用户按 Enter 才检索。你无法预知是哪一种，所以输入后先用 browser_wait_for({condition:"stable"}) 观察。',
   '- 如果 wait_for 返回 satisfied=true（DOM 变了），说明是自动检索，继续快照看结果即可。',
-  '- 如果 satisfied=false 且快照里没有出现结果列表/下拉选项，说明这个输入框很可能要按 Enter 触发。立即调用 browser_press_key({key:"Enter"}) —— input_text 之后焦点仍在该输入框上，按键会作用在它身上。按完再 wait_for + snapshot。',
+  '- 如果 satisfied=false 且快照里没有出现结果列表/下拉选项，说明这个输入框很可能要按 Enter 触发。立即调用 browser_press_key({key:"Enter"}) —— browser_input_text 写入文本后焦点（光标）仍然在输入框里，没有离开，所以按 Enter 会作用在当前的输入框上，触发搜索。这是关键：输入后不要重新点击输入框，直接按 Enter 即可。',
   '- 按 Enter 前先从快照判断这个字段是什么：搜索框、筛选器、标签输入框按 Enter 是合理的；普通文本域、评论框按 Enter 可能是换行或提交整个表单，要谨慎。placeholder 含「搜索/检索/筛选」、位置在筛选条或工具栏里，都是强信号。',
   '- 不要在输入后没反应时直接滚动页面或滚动浮层去找结果 —— 那是下拉展开后的动作，检索还没触发时滚动只会浪费步数。先确认检索是否已触发。',
   '- 按 Enter 可能导致页面导航（例如某些全站搜索）。返回值带 navigation 时按上面的「导航偏离处理」应对。',
