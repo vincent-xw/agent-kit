@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { AgentKitError, createAgentHarness, createContextManager, createMemorySessionStore, createPromptRegistry, createToolRegistry } from './index.js'
-import type { LlmResult, PendingCall, PendingCallStore, SessionMessage, ToolCall } from './index.js'
+import type { LlmRequest, LlmResult, PendingCall, PendingCallStore, SessionMessage, ToolCall } from './index.js'
 
 /** 构造单个工具调用的模型响应，避免每处重复写复数壳。 */
 function callsOf(...calls: ToolCall[]): LlmResult {
@@ -52,13 +52,38 @@ describe('AgentHarness', () => {
     })
   })
 
-  it('未注册工具返回稳定错误码', async () => {
+  it('未注册工具不中断整轮，把可用工具列表回传让模型自纠', async () => {
+    // 模型在上下文压力大时会输出畸形函数名（曾出现 `browser_click" ref="259`）。
+    // 这种偶发抽风不该杀死整个任务，应让模型有机会用正确的名字重试。
+    const tools = createToolRegistry()
+    tools.register({
+      name: 'weather_read',
+      execution: 'server',
+      input: z.object({}),
+      output: z.object({ temperature: z.number() }),
+      execute: async () => ({ temperature: 26 }),
+    })
+    const requests: LlmRequest[] = []
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-3', toolName: 'unknown', input: {} }) },
-      sessions: createMemorySessionStore(), tools: createToolRegistry(), maxSteps: 3,
+      llm: {
+        complete: async (request) => {
+          requests.push(request)
+          return requests.length === 1
+            ? callsOf({ callId: 'call-3', toolName: 'weather_read" ref="259', input: {} })
+            : { type: 'final', output: '已改用正确工具' }
+        },
+      },
+      sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
-    await expect(harness.run({ sessionId: 's-3', input: '执行未知工具', context: {} })).rejects.toMatchObject({ code: 'TOOL_NOT_REGISTERED' } satisfies Partial<AgentKitError>)
+    await expect(harness.run({ sessionId: 's-3', input: '执行未知工具', context: {} })).resolves.toEqual({
+      type: 'final',
+      output: '已改用正确工具',
+    })
+    // 模型必须收到失败反馈，且反馈里带上可选工具名。
+    const toolMessage = requests[1]?.messages.find((message) => message.role === 'tool')
+    expect(toolMessage?.content).toMatchObject({ ok: false, code: 'TOOL_NOT_REGISTERED' })
+    expect(JSON.stringify(toolMessage?.content)).toContain('weather_read')
   })
 
   it('工具输入不符合 Schema 返回 TOOL_INPUT_INVALID', async () => {

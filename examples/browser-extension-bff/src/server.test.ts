@@ -209,6 +209,8 @@ describe('浏览器工具定义', () => {
       'browser_read_page',
       'browser_locate_element',
       'browser_click',
+      'browser_hover',
+      'browser_wait_for',
       'browser_input_text',
       'browser_press_key',
       'browser_scroll',
@@ -216,6 +218,8 @@ describe('浏览器工具定义', () => {
       'browser_screenshot',
       'browser_go_back',
       'browser_save_file',
+      'browser_read_file',
+      'browser_write_file',
     ])
   })
 

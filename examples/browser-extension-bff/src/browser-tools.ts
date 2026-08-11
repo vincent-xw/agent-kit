@@ -57,7 +57,7 @@ export const browserToolDefinitions: ToolDefinition[] = [
     name: 'browser_snapshot',
     execution: 'remote',
     description:
-      '列出当前视口内所有可交互元素及其 ref 编号。这是自由操作的**起点**：先快照看清页面上有什么，再用 ref 指定目标，不要凭猜测写选择器。页面变化（点击、滚动、导航）后需要重新快照。',
+      '列出当前视口内所有可交互元素及其 ref 编号（浮层内的元素即使在视口外也会列出）。这是自由操作的**起点**：先快照看清页面上有什么，再用 ref 指定目标，不要凭猜测写选择器。页面变化（点击、滚动、导航、下拉展开）后需要重新快照。',
     input: z.object({}),
     output: z.object({
       url: z.string(),
@@ -75,6 +75,10 @@ export const browserToolDefinitions: ToolDefinition[] = [
           occluded: z.boolean().optional().describe('为真表示被遮挡，不应直接点击'),
           disabled: z.boolean().optional(),
           value: z.string().optional().describe('输入类元素的当前值'),
+          parent: z.number().optional().describe('所属容器的 ref，用于判断元素归属于哪个浮层或区域'),
+          expanded: z.boolean().optional().describe('该元素已展开（aria-expanded 为真）'),
+          inPopup: z.boolean().optional().describe('位于浮层内。浮层里出现选项即说明下拉已展开'),
+          soft: z.boolean().optional().describe('靠启发式识别，可能不是真的可点；点了没反应就换其他 ref'),
         }),
       ),
       truncated: z.number().optional().describe('因数量上限被省略的元素数；大于 0 说明还有元素没列出'),
@@ -118,6 +122,42 @@ export const browserToolDefinitions: ToolDefinition[] = [
       })
       .describe('ref 与 x/y 至少给一组'),
     output: actionResultSchema,
+  },
+  {
+    name: 'browser_hover',
+    execution: 'remote',
+    description:
+      '把鼠标移到目标元素上（不点击）。用于展开「悬停才出现」的菜单与浮层。悬停后会稍等浮层渲染，随后需要重新 browser_snapshot 才能看到新出现的元素。优先传 ref。',
+    input: z
+      .object({
+        ref: z.number().int().optional().describe('来自 browser_snapshot 的元素引用（推荐）'),
+        x: z.number().optional().describe('横坐标，CSS 像素。传了 ref 就不必传'),
+        y: z.number().optional().describe('纵坐标，CSS 像素。传了 ref 就不必传'),
+        label: z.string().optional().describe('用于日志的可读标签'),
+        settleMs: z.number().int().min(0).max(2000).optional().describe('悬停后等待浮层渲染的毫秒数，默认 300'),
+      })
+      .describe('ref 与 x/y 至少给一组'),
+    output: actionResultSchema,
+  },
+  {
+    name: 'browser_wait_for',
+    execution: 'remote',
+    description:
+      '等待页面达到某个状态再继续。appear/disappear 等某个选择器对应的元素出现或消失，stable 等页面停止变化（浮层动画、异步加载）。超时不算失败，会返回 satisfied=false，你可以据此改变策略。',
+    input: z
+      .object({
+        condition: z.enum(['appear', 'disappear', 'stable']).describe('等待哪种条件'),
+        selector: z.string().optional().describe('appear / disappear 需要的 CSS 选择器'),
+        timeoutMs: z.number().int().min(100).max(15000).optional().describe('最长等待毫秒数，默认 5000'),
+        stableMs: z.number().int().min(100).max(3000).optional().describe('stable 条件下判定「不再变化」的静默毫秒数，默认 500'),
+      })
+      .describe('condition 为 appear / disappear 时必须给 selector'),
+    output: z.object({
+      satisfied: z.boolean().describe('条件是否在超时前达成'),
+      waitedMs: z.number().describe('实际等待的毫秒数'),
+      condition: z.string(),
+      observed: z.string().describe('实际观测到的情况，未达成时用于定位原因'),
+    }),
   },
   {
     name: 'browser_input_text',
@@ -191,14 +231,17 @@ export const browserToolDefinitions: ToolDefinition[] = [
   {
     name: 'browser_screenshot',
     execution: 'remote',
-    description: '截取当前视口的截图。截图会自动展示在对话区域，用户可以点击查看大图或下载。适合用于：1) 观察页面实际状态辅助定位 2) 为报告/周报等产出配图。截图对用户可见，不需要额外操作。',
+    description: '截取当前视口的截图。截图会自动展示在对话区域，用户可以点击查看大图或下载。适合用于：1) 观察页面实际状态辅助定位 2) 为报告/周报等产出配图。截图对用户可见，不需要额外操作。注意：截图内容不会返回给你，你无法「看到」画面；需要读取页面信息请用 browser_snapshot 或 browser_read_page。',
     input: z.object({
       format: z.enum(['png', 'jpeg']).optional(),
     }),
+    // 有意不返回 base64：一张截图约 4 万 token，会挤爆上下文导致模型输出退化。
+    // 图片数据留在扩展侧供 UI 展示，模型只需知道截图已生成。
     output: z.object({
-      dataUrl: z.string().describe('base64 data URL'),
+      screenshotId: z.string().describe('截图标识，供用户在对话区域查看'),
       width: z.number(),
       height: z.number(),
+      message: z.string(),
     }),
   },
   {
@@ -326,6 +369,24 @@ export const freeFormPrompt = [
   '- 某些域名与路径不在允许范围内，写操作会被拒绝。遇到这种情况说明原因，不要尝试其他方式。',
   '- 不要假装自己还在原页面上操作 —— 如果页面已经导航，你必须根据 navigation 提示或重新快照来确认当前位置。',
   '',
+  '下拉框与浮层（重要）：',
+  '- 很多网站的下拉不是原生 select，而是 JS 组件。它的选项在点开之后才会出现在页面上，所以必须：点触发器 → browser_wait_for 等浮层出现 → 重新 browser_snapshot → 再点选项。不要指望一次快照就能看到选项。',
+  '- 悬停才展开的菜单用 browser_hover，它不会点击，只把鼠标移上去。',
+  '- 浮层有动画或数据要异步加载时，用 browser_wait_for({condition:"stable"}) 等它稳定下来再快照，否则会拍到半渲染的中间态。',
+  '- browser_wait_for 超时返回 satisfied=false 不代表出错，说明预期的变化没发生 —— 这时应重新快照看清现状，而不是重试同一个动作。',
+  '- 快照里 inPopup 为真表示该元素在浮层内。浮层里出现了选项，就说明下拉已经展开。',
+  '- 触发器上的 expanded 为真也表示已展开；为假或缺失时先点它展开。',
+  '- parent 指向元素所属容器的 ref，可用来判断哪些选项属于同一个下拉。',
+  '- soft 为真的元素是靠启发式识别出来的，不一定真的可点。点了没反应就换同一浮层内的其他 ref，或改点它的 parent。',
+  '',
+  '搜索与筛选输入框（重要）：',
+  '- 很多检索框没有「搜索」按钮。它们的触发方式有两种：(a) 监听值变化、停止输入后自动检索；(b) 等用户按 Enter 才检索。你无法预知是哪一种，所以输入后先用 browser_wait_for({condition:"stable"}) 观察。',
+  '- 如果 wait_for 返回 satisfied=true（DOM 变了），说明是自动检索，继续快照看结果即可。',
+  '- 如果 satisfied=false 且快照里没有出现结果列表/下拉选项，说明这个输入框很可能要按 Enter 触发。立即调用 browser_press_key({key:"Enter"}) —— input_text 之后焦点仍在该输入框上，按键会作用在它身上。按完再 wait_for + snapshot。',
+  '- 按 Enter 前先从快照判断这个字段是什么：搜索框、筛选器、标签输入框按 Enter 是合理的；普通文本域、评论框按 Enter 可能是换行或提交整个表单，要谨慎。placeholder 含「搜索/检索/筛选」、位置在筛选条或工具栏里，都是强信号。',
+  '- 不要在输入后没反应时直接滚动页面或滚动浮层去找结果 —— 那是下拉展开后的动作，检索还没触发时滚动只会浪费步数。先确认检索是否已触发。',
+  '- 按 Enter 可能导致页面导航（例如某些全站搜索）。返回值带 navigation 时按上面的「导航偏离处理」应对。',
+  '',
   '',
   '数据导出：',
   '- 当用户需要把收集到的数据导出时，调用 browser_save_file 生成文件。支持 txt/csv/xlsx/json 格式。',
@@ -333,8 +394,12 @@ export const freeFormPrompt = [
   '- 文件生成后用户会在对话区域看到下载按钮，你不需要做其他操作，只需告知用户文件已生成。',
   '',
   '文件操作：',
-  '- 上下文里的 fileList 列出了用户已上传的持久化文件。需要读取时调用 browser_read_file({ name })。',
-  '- 需要保存中间结果或加工后的数据时，调用 browser_write_file({ name, content })。保存的文件跨会话可用。',
+  '- 上下文里的 fileList 列出了用户勾选带入本轮的文件（含 agent 之前生成、截图或上传的文件）。',
+  '- fileList 里 isImage 为真的是截图，没有 content 字段，你看不到画面；需要了解页面时调用 browser_snapshot 或 browser_read_page。',
+  '- fileList 里有 content 字段的文本文件，内容已直接提供，不需要再调 browser_read_file；只有在需要完整内容（文件被截断、或你需要的部分不在 content 里）时才用 browser_read_file({ name })。',
+  '- 需要保存中间结果或加工后的数据时，调用 browser_write_file({ name, content })。保存的文件跨会话可用，用户可在附件管理里勾选带入下一轮。',
+  '- browser_save_file 只用于最终给用户下载的文件（xlsx 等二进制）。它生成的文件会出现在附件管理里，可下载。',
+  '- 生成可下载文件后，在最终回复里用 markdown 链接给出下载提示，例如 [文件名](file://文件名)；如果没法塞链接，就告诉用户去附件管理里下载。',
   '- 表格数据用 CSV 格式存储和交换，不要用 xlsx（xlsx 只在最终导出下载时用 browser_save_file 生成）。',
   '- 大文件会被截断，如需完整内容请分段读取或分段处理。',
   '',

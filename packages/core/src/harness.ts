@@ -193,7 +193,23 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       const remoteCalls: Array<{ callId: string; toolName: string; input: unknown }> = []
       for (const call of result.calls) {
         const tool = deps.tools.get(call.toolName)
-        if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${call.toolName}`)
+        // 未注册的工具名不中断整轮：模型偶发输出畸形函数名（上下文压力大时尤其常见），
+        // 把可选工具列表回传让它自己纠正，比让整个任务猝死更有用。
+        if (!tool) {
+          const available = deps.tools.list().map((definition) => definition.name).join(', ')
+          await deps.audit?.log({ requestId, durationMs: 0, toolName: call.toolName, errorCode: 'TOOL_NOT_REGISTERED' })
+          history.push({
+            role: 'tool',
+            content: {
+              ok: false,
+              code: 'TOOL_NOT_REGISTERED',
+              message: `工具未注册：${call.toolName}。可用工具：${available}。请用其中之一重新调用。`,
+            },
+            callId: call.callId,
+            toolName: call.toolName,
+          })
+          continue
+        }
         const parsedInput = parseWithCode(tool.input, call.input, 'TOOL_INPUT_INVALID')
         if (tool.execution === 'remote') {
           // promptName 随挂起状态保存：resume 要用同一个提示词继续。

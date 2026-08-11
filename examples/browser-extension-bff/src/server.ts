@@ -6,17 +6,19 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * 获取程序所在目录。
+ * 获取程序所在目录（配置文件与数据库的落地位置）。
  *
- * node 直跑时用 __filename（CJS bundle）或 import.meta.url（ESM）的目录；
- * pkg 打包后 __filename 指向虚拟 FS（/snapshot/...），此时用 process.execPath 的目录。
+ * pkg 打包后代码跑在只读虚拟 FS 里（POSIX 是 /snapshot/...，Windows 是 C:\snapshot\...），
+ * 所以不能用 __filename 的目录，必须用 exe 自身所在目录。
  */
 function getProgramDir(): string {
+  // pkg 运行时会注入 process.pkg，跨平台判断，不依赖路径前缀。
+  if ((process as { pkg?: unknown }).pkg !== undefined) {
+    return dirname(process.execPath)
+  }
   // CJS bundle 里有 __filename
   if (typeof __filename !== 'undefined') {
-    const dir = dirname(__filename)
-    // pkg 虚拟 FS 路径以 /snapshot/ 开头，此时 fallback 到 execPath
-    if (!dir.startsWith('/snapshot')) return dir
+    return dirname(__filename)
   }
   // ESM 模式
   try {
@@ -26,7 +28,6 @@ function getProgramDir(): string {
   } catch {
     // import.meta 不可用时 fallback
   }
-  // pkg 打包的 exe：execPath 就是 exe 本身
   return dirname(process.execPath)
 }
 

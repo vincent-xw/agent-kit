@@ -73,7 +73,7 @@ curl -s localhost:8787/v1/agent/sessions/s-1/tool-results/<callId> -H 'authoriza
 
 全部 `execution: 'remote'`，由扩展执行、BFF 只校验结构：
 
-`browser_snapshot`、`browser_read_page`、`browser_locate_element`、`browser_click`、`browser_input_text`、`browser_press_key`、`browser_scroll`、`browser_verify`、`browser_screenshot`
+`browser_snapshot`、`browser_read_page`、`browser_locate_element`、`browser_click`、`browser_hover`、`browser_wait_for`、`browser_input_text`、`browser_press_key`、`browser_scroll`、`browser_verify`、`browser_screenshot`、`browser_go_back`、`browser_save_file`、`browser_read_file`、`browser_write_file`
 
 坐标契约：`x` / `y` 一律是相对主页面 viewport 的 **CSS 像素**，不乘 `devicePixelRatio`。该约定写在工具 description 里，模型据此传参。
 
