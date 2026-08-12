@@ -1,47 +1,46 @@
-# Flutter Dev BFF：桥接层重构与 SSE 实时进度
+# Flutter Dev BFF：SSE 步内可见性
 
 ## 目标
 
-修复 `examples/flutter-dev-bff` 的 HTTP 桥接层缺陷，并在其上实现工具执行的实时事件推送，使真机调试时能看清 Agent 正在执行哪一步。
+向 Web UI 实时推送工具执行事件，使长耗时工具运行期间能看清 Agent 正卡在哪一步。
 
-本设计覆盖三件事：
+## 前置条件（已完成）
 
-1. 替换手写的 Node ↔ Hono 桥接，修复截图二进制损坏。
-2. 将服务绑定限制在 loopback，使「不做会话隔离」的安全前提成立。
-3. 新增 EventBus 与 SSE 端点，向 Web UI 推送工具级执行事件。
+本设计原本还包含桥接层重构与 loopback 绑定两项，均已实现并合入 `main`：
 
-## 背景：两个已确认的缺陷
+- `e8ed947` — 用 `@hono/node-server` 替换手写桥接，修复截图 PNG 二进制损坏
+- `678f8f6` — 显式绑定 `127.0.0.1`
 
-### 截图二进制损坏
+这两项是 SSE 的前置条件：手写桥接用 `res.end(await response.text())` 缓冲整个响应体，流式推送无法成立；loopback 绑定则是「不做会话隔离」这一决策的安全前提。
 
-`src/server.ts` 的桥接用 `res.end(await response.text())` 把响应体按 UTF-8 文本解码。`/api/screenshots/:id` 返回 PNG 二进制，经此路径后字节被破坏。
+实现后 `flutter-dev-bff` 测试数从 19 增至 22，全 workspace 148 个测试通过。
 
-实测：19 字节 PNG 头变成 27 字节，magic byte `0x89` 被替换为 `ef bf bd`（U+FFFD）。Web UI 通过 `<img src="/api/screenshots/...">` 渲染截图，因此缺陷用户直接可见。
+## 背景：为什么步粒度不够
 
-同样的桥接代码存在于 `browser-extension-bff`，但该 example 没有二进制路由，所以未暴露。本设计只修改 `flutter-dev-bff`。
+`flutter-dev-bff` 的工具耗时远超浏览器工具：
 
-### 服务暴露在局域网
+```
+flutter_test        300_000ms
+flutter_analyze     120_000ms
+flutter_run_start   120_000ms
+mobile_app_install  120_000ms
+```
 
-`server.listen(port, ...)` 未传 host 参数。实测 Node 此时绑定 `::`（全部网卡），通过本机局域网地址可直接访问成功。
+浏览器插件的工具是 DOM 操作，亚秒级完成，步边界足以提供进度感。flutter 这边单个工具可运行 5 分钟，期间界面完全静止。
 
-叠加两个因素后风险放大：
+[取消/中断与步数限制设计](2026-08-12-cancel-and-step-limit-design.md) 引入客户端持有循环后，盲区从「整个任务」缩小到「一步」。但一步不等于一瞬间——一步包含一次模型调用与该轮全部 server 工具执行，因此含 `flutter_test` 的步骤仍会阻塞 5 分钟。SSE 覆盖的正是这段步内盲区。
 
-- 自动生成的 `.env` 模板默认写入 `BFF_API_TOKEN=dev-token`。
-- 事件推送不做会话隔离，一个连接可见全部工具事件。
-
-结果是同一局域网内任何人都可连接他人的 BFF、观察其事件流、操作其设备、触发其 `flutter test`。
+**本设计不依赖该取消设计先落地。** 两者独立：推送的事件类型完全相同，客户端持有循环只改变 SSE 覆盖盲区的比例，不改变事件结构。
 
 ## 设计决策
 
-### 绑定 loopback，不做会话隔离
+### 不做会话隔离
 
 会话隔离与网络隔离是两个独立维度。前者决定同进程内不同会话是否互相可见，后者决定其他机器能否连入。
 
-交付给研发和测试后，每人在自己机器上运行独立进程、独立数据库、独立设备，进程之间物理不连通。在服务只绑 `127.0.0.1` 的前提下，广播范围即单机单人，不构成信息泄露。多标签页并发时只会看到自己另一标签页的工具调用。
+交付给研发和测试后，每人在自己机器上运行独立进程、独立数据库、独立设备，进程之间物理不连通。服务已绑定 `127.0.0.1`，因此广播范围即单机单人，不构成信息泄露。多标签页并发时只会看到自己另一标签页的工具调用。
 
 因此不实现 `/api/events/:sessionId`，改为单一广播端点 `/api/events`。这同时规避了一个结构性障碍：core 的 `ToolExecutionContext` 只透传 `signal`，包装后的 `execute` 无法得知 sessionId，按会话分发需要引入 `AsyncLocalStorage` 或修改共享契约。
-
-绑定地址显式写死，不依赖库的默认值。
 
 ### SSE 而非 WebSocket 或轮询
 
@@ -52,11 +51,17 @@ Agent 中间态是服务端单向持续推送，与 SSE 形态一致。SSE 是�
 - 单向通信：无影响，用户输入仍走 `/run`。
 - HTTP/1.1 同域连接数上限 6：本地开发不会开这么多标签页。
 - 中间层缓冲会导致事件成块延迟：本地直连无此层，日后若加网关需关闭 buffering。
-- 只能传文本：截图仍走 `/api/screenshots/:id` 独立二进制路由，因此桥接层必须同时正确支持二进制与流式。
+- 只能传文本：截图仍走 `/api/screenshots/:id` 独立二进制路由。
+
+### 不设 `run_start` / `run_end`
+
+无论是否启用客户端持有循环，Web UI 都自己发起请求，天然知道运行何时开始、何时结束。服务端再告知一遍不携带新信息，反而制造两个「结束」信号（SSE 与 HTTP 响应是两条独立连接，到达顺序无保证），多一个状态源即多一类 bug。
+
+`run_end` 若携带 steps 字段则无法填充：步数是 harness 内部的局部循环变量（[harness.ts:154](../../../packages/core/src/harness.ts:154)），BFF 包装层看不见。改为统计 `tool_end` 事件数也不正确——一步可含多个 `tool_calls`，且最后一步通常无工具调用。
 
 ### 事件分两档，verbose 只推摘要
 
-默认档推工具级事件。`LOG_LEVEL=verbose` 时额外推 LLM 级事件，与现有 verbose 日志开关保持一致。
+默认档推工具级事件。`LOG_LEVEL=verbose` 时额外推 LLM 级事件，与现有 verbose 日志开关一致。
 
 `LlmTraceEvent` 的 `body` 是完整 HTTP 请求体（含 system prompt 全文与全部会话消息），`responseBody` 是模型原文。这与 `AuditLogger` 契约明确禁止记录的内容重叠，因此即使在 verbose 档也**只推摘要字段**，不推 `body` 与 `responseBody`。
 
@@ -66,23 +71,9 @@ Agent 中间态是服务端单向持续推送，与 SSE 形态一致。SSE 是�
 
 选择 `?token=` 查询参数配合 `EventSource`，保留自动重连。代价是 token 会落入日志。备选方案是 `fetch` + `ReadableStream`，可携带 header，但需自行实现重连逻辑。
 
-在服务只绑 loopback、且为本地单人开发工具的前提下，接受该代价以换取不必手写重连。
+服务只绑 loopback 且为本地单人开发工具，接受该代价以换取不必手写重连。
 
 ## 组件设计
-
-### 桥接层
-
-删除 `createServer`、`readBody`、header 拷贝循环与 `res.end(await response.text())`，替换为：
-
-```ts
-import { serve } from '@hono/node-server'
-await bff.ready
-serve({ fetch: bff.app.fetch, port, hostname: '127.0.0.1' })
-```
-
-新增生产依赖 `@hono/node-server`。约 30 行桥接代码缩减为 3 行，二进制与流式响应由适配器处理。
-
-`await bff.ready` 由「每请求前 await」上提为启动时一次（ESM 顶层 await），行为等价。`ready` 仍然导出，测试继续使用。
 
 ### EventBus
 
@@ -105,7 +96,9 @@ createEventBus({ bufferSize: 200 })
 - 抛错发 `tool_end`（`ok: false`，含错误信息），随后**原样抛出**，不吞异常。
 - `execute` 未定义的工具原样透传。
 
-输入与输出经 `truncate` 处理，上限 2KB，超出部分标记截断。截断是必需的：`mobile_snapshot` 返回整棵无障碍树，单条事件可达数十 KB，50 步累积会拖垮浏览器。
+输入与输出经 `truncate` 处理，上限 2KB，超出部分标记截断。截断是必需的：`mobile_snapshot` 返回整棵无障碍树，单条事件可达数十 KB，长任务累积会拖垮浏览器。
+
+注意抛错后必须原样抛出而非转换：harness 会捕获工具错误并转成 `ok: false` 结果回传给模型（[harness.ts:229](../../../packages/core/src/harness.ts:229)），改变异常类型会干扰该机制。
 
 ### 事件类型
 
@@ -122,8 +115,6 @@ tool_end    { name, ok, durationMs, output? | error?, seq, ts }
 llm_request  { requestId, model, messageCount, toolCount }
 llm_response { requestId, durationMs, finishReason, toolCallCount }
 ```
-
-不设 `run_start` / `run_end` 事件。Web UI 自己发起 `/run` 请求，天然知道运行何时开始、何时随响应结束，无需服务端告知。此外步数是 harness 内部状态，BFF 包装层无法得知，`run_end` 携带的 steps 字段无法填充。
 
 LLM 事件通过组合 `llmTrace` 回调实现：verbose 档下传入的回调同时写终端日志并向 EventBus 发摘要事件，从 `LlmTraceEvent` 中只提取上述字段。
 
@@ -145,24 +136,21 @@ LLM 事件通过组合 `llmTrace` 回调实现：verbose 档下传入的回调�
 
 采用 TDD，先写测试。
 
-### 截图回归测试
-
-缺陷位于桥接层而非 Hono app 内部，直接调用 `app.fetch` 无法复现。测试必须真实启动 `serve()` 监听临时端口，通过 `fetch` 取回 PNG 并逐字节比对，才能证明修复有效。
-
-### 其余覆盖
-
 - EventBus：seq 单调递增、订阅者收到事件、退订后停止接收、缓冲不超上限、按 seq 重放。
 - 工具包装：发出 start 与 end 事件、透传返回值、抛错时发出 error 事件且异常原样抛出、无 execute 的工具透传。
 - 截断：超长 payload 被截断并标记。
 - SSE 端点：无 token 返回 401、有 token 返回 `text/event-stream`、能接收到事件、`Last-Event-ID` 重放生效。
 
-现有 19 个测试须保持通过。
+SSE 端点测试须启动真实监听端口（复用 `bridge.test.ts` 中的 `startFlutterDevBffServer` 模式）——`app.request()` 无法验证流式响应。
+
+现有 148 个测试须保持通过。
 
 ## 范围之外
 
 - 会话隔离（`/api/events/:sessionId`）。
-- 修改 `browser-extension-bff` 的同源桥接代码。
+- 修改 `browser-extension-bff`。它的桥接代码有同源缺陷但无二进制路由，因此未暴露；它也因此无法做 SSE。
 - 修改 core 的 `ToolExecutionContext` 契约。
+- 流式 LLM 输出：core 当前不支持。
 - 真机端到端验证：本设计完成后单独进行，SSE 将作为其观察窗口。
 - Phase 4 Companion App 与 Phase 5 WebView CDP。
 
