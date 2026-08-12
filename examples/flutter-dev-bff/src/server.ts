@@ -21,6 +21,7 @@ function getProgramDir(): string {
 }
 
 import { serve } from '@hono/node-server'
+import { streamSSE } from 'hono/streaming'
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
 import {
@@ -37,6 +38,9 @@ import { UiAutomatorDumpProvider } from './services/uiautomator-provider.js'
 import { FlutterProcessManager } from './services/flutter-process-manager.js'
 import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
+import { createEventBus } from './services/event-bus.js'
+import type { FlutterEvent } from './services/event-bus.js'
+import { instrumentTools } from './tool-events.js'
 
 export function createFlutterDevBff(options: {
   masterKey: string
@@ -86,6 +90,8 @@ export function createFlutterDevBff(options: {
     projectPath: options.flutterProjectPath,
   })
 
+  const bus = createEventBus()
+
   const prompts = createPromptRegistry()
   prompts.register({ name: 'free-form', version: '1', prompt: freeFormPrompt })
   prompts.register({ name: 'debugging', version: '1', prompt: debuggingPrompt })
@@ -100,7 +106,7 @@ export function createFlutterDevBff(options: {
     ...(options.llmTrace ? { llmTrace: options.llmTrace } : {}),
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
-  for (const tool of toolDefinitions) runtime.tools.register(tool)
+  for (const tool of instrumentTools(toolDefinitions, bus)) runtime.tools.register(tool)
 
   const app = createAgentBff({
     authenticate: async (request) => {
@@ -139,8 +145,43 @@ export function createFlutterDevBff(options: {
     return c.body(readFileSync(filePath))
   })
 
+  app.get('/api/events', (c) => {
+    // 浏览器 EventSource 不支持自定义请求头，因此 token 走查询参数。
+    // 服务只绑 loopback，接受 token 落入日志的代价以换取 EventSource 自带的重连。
+    if (c.req.query('token') !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const lastEventId = c.req.header('last-event-id')
+    const fromSeq = lastEventId !== undefined ? Number(lastEventId) : undefined
+
+    return streamSSE(c, async (stream) => {
+      const queue: FlutterEvent[] = []
+      const unsubscribe = bus.subscribe((event) => queue.push(event), fromSeq)
+      stream.onAbort(unsubscribe)
+      let lastPing = Date.now()
+      try {
+        while (!stream.aborted && !stream.closed) {
+          while (queue.length > 0) {
+            const event = queue.shift() as FlutterEvent
+            await stream.writeSSE({
+              data: JSON.stringify(event),
+              event: event.type,
+              id: String(event.seq),
+            })
+          }
+          if (Date.now() - lastPing >= 15_000) {
+            // 注释行心跳：保持连接，并让写失败暴露出已死的客户端。
+            await stream.write(': ping\n\n')
+            lastPing = Date.now()
+          }
+          await stream.sleep(250)
+        }
+      } finally {
+        unsubscribe()
+      }
+    })
+  })
+
   const ready = seedSecret(runtime, options.llm)
-  return { app, runtime, database, prompts, adb, flutter, ready }
+  return { app, runtime, database, prompts, adb, flutter, bus, ready }
 }
 
 export function startFlutterDevBffServer(

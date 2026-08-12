@@ -12,8 +12,8 @@ describe('EventBus', () => {
     bus.emit({ type: 'tool_end', name: 'a' })
 
     expect(received.map((e) => e.seq)).toEqual([1, 2])
-    expect(received[0].type).toBe('tool_start')
-    expect(typeof received[0].ts).toBe('number')
+    expect(received[0]!.type).toBe('tool_start')
+    expect(typeof received[0]!.ts).toBe('number')
   })
 
   it('退订后不再收到事件', () => {
@@ -73,6 +73,6 @@ describe('EventBus', () => {
     bus.emit({ type: 'tool_start', name: 'new' })
 
     expect(received).toHaveLength(1)
-    expect(received[0].name).toBe('new')
+    expect(received[0]!.name).toBe('new')
   })
 })

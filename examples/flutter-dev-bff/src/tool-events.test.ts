@@ -11,6 +11,12 @@ function collect(bus: ReturnType<typeof createEventBus>): FlutterEvent[] {
   return events
 }
 
+/** instrumentTools 返回数组，取首项。noUncheckedIndexedAccess 下需断言非空。 */
+function wrapOne(definition: ToolDefinition, bus: ReturnType<typeof createEventBus>): ToolDefinition {
+  const [wrapped] = instrumentTools([definition], bus)
+  return wrapped!
+}
+
 const okTool: ToolDefinition = {
   name: 'demo_ok',
   execution: 'server',
@@ -19,14 +25,15 @@ const okTool: ToolDefinition = {
   execute: async () => ({ ok: true }),
 }
 
+const signal = () => new AbortController().signal
+
 describe('truncate', () => {
   it('短内容原样序列化', () => {
     expect(truncate({ a: 1 })).toBe('{"a":1}')
   })
 
   it('超长内容被截断并标记', () => {
-    const long = { text: 'x'.repeat(5000) }
-    const result = truncate(long, 100)
+    const result = truncate({ text: 'x'.repeat(5000) }, 100)
 
     expect(result.length).toBeLessThan(200)
     expect(result).toContain('truncated')
@@ -44,21 +51,21 @@ describe('instrumentTools', () => {
   it('执行成功时发出 tool_start 与 tool_end', async () => {
     const bus = createEventBus()
     const events = collect(bus)
-    const [wrapped] = instrumentTools([okTool], bus)
+    const wrapped = wrapOne(okTool, bus)
 
-    await wrapped.execute!({ q: 'hi' }, { signal: new AbortController().signal })
+    await wrapped.execute!({ q: 'hi' }, { signal: signal() })
 
     expect(events.map((e) => e.type)).toEqual(['tool_start', 'tool_end'])
-    expect(events[0].name).toBe('demo_ok')
-    expect(events[1].ok).toBe(true)
-    expect(typeof events[1].durationMs).toBe('number')
+    expect(events[0]!.name).toBe('demo_ok')
+    expect(events[1]!.ok).toBe(true)
+    expect(typeof events[1]!.durationMs).toBe('number')
   })
 
   it('透传原始返回值', async () => {
     const bus = createEventBus()
-    const [wrapped] = instrumentTools([okTool], bus)
+    const wrapped = wrapOne(okTool, bus)
 
-    const result = await wrapped.execute!({ q: 'hi' }, { signal: new AbortController().signal })
+    const result = await wrapped.execute!({ q: 'hi' }, { signal: signal() })
 
     expect(result).toEqual({ ok: true })
   })
@@ -74,15 +81,13 @@ describe('instrumentTools', () => {
     }
     const bus = createEventBus()
     const events = collect(bus)
-    const [wrapped] = instrumentTools([failing], bus)
+    const wrapped = wrapOne(failing, bus)
 
-    await expect(
-      wrapped.execute!({}, { signal: new AbortController().signal }),
-    ).rejects.toBe(boom)
+    await expect(wrapped.execute!({}, { signal: signal() })).rejects.toBe(boom)
 
     expect(events.map((e) => e.type)).toEqual(['tool_start', 'tool_end'])
-    expect(events[1].ok).toBe(false)
-    expect(String(events[1].error)).toContain('设备未连接')
+    expect(events[1]!.ok).toBe(false)
+    expect(String(events[1]!.error)).toContain('设备未连接')
   })
 
   it('没有 execute 的工具原样透传，不包装', () => {
@@ -92,14 +97,13 @@ describe('instrumentTools', () => {
       input: z.object({}),
       output: z.object({}),
     }
-    const [wrapped] = instrumentTools([remote], createEventBus())
 
-    expect(wrapped).toBe(remote)
+    expect(wrapOne(remote, createEventBus())).toBe(remote)
   })
 
   it('保留 name、execution、schema 与 timeoutMs', () => {
     const timed: ToolDefinition = { ...okTool, timeoutMs: 12_345 }
-    const [wrapped] = instrumentTools([timed], createEventBus())
+    const wrapped = wrapOne(timed, createEventBus())
 
     expect(wrapped.name).toBe('demo_ok')
     expect(wrapped.execution).toBe('server')
