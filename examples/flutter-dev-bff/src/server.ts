@@ -1,5 +1,3 @@
-import { createServer } from 'node:http'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, existsSync, writeFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -22,6 +20,7 @@ function getProgramDir(): string {
   return dirname(process.execPath)
 }
 
+import { serve } from '@hono/node-server'
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
 import {
@@ -144,21 +143,23 @@ export function createFlutterDevBff(options: {
   return { app, runtime, database, prompts, adb, flutter, ready }
 }
 
+export function startFlutterDevBffServer(
+  fetchHandler: (request: Request) => Response | Promise<Response>,
+  port: number,
+): Promise<{ server: ReturnType<typeof serve>; port: number }> {
+  return new Promise((resolve) => {
+    const server = serve({ fetch: fetchHandler, port }, (info) => {
+      resolve({ server, port: info.port })
+    })
+  })
+}
+
 async function seedSecret(
   rt: { secrets: { put(secret: LlmSecret): Promise<void> } },
   llm?: LlmSecret,
 ): Promise<void> {
   if (!llm) return
   await rt.secrets.put(llm)
-}
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-  })
 }
 
 function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
@@ -260,23 +261,9 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
     llmMaxRetries,
   })
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    await bff.ready
-    const headers = new Headers()
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (typeof value === 'string') headers.set(key, value)
-    }
-    const body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req)
-    const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, {
-      method: req.method ?? 'GET',
-      headers,
-      body,
-    })
-    const response = await bff.app.fetch(request)
-    res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
-    res.end(await response.text())
-  })
-  server.listen(port, () => console.log(`Flutter Dev BFF listening on http://localhost:${port}`))
+  await bff.ready
+  const { server } = await startFlutterDevBffServer((request) => bff.app.fetch(request), port)
+  console.log(`Flutter Dev BFF listening on http://localhost:${port}`)
 
   const shutdown = async () => {
     console.log('\n[flutter-bff] 正在关闭...')

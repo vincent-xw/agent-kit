@@ -26,6 +26,7 @@
     "@agent-kit/adapter-sqlite": "workspace:*",
     "@agent-kit/bff-hono": "workspace:*",
     "@agent-kit/core": "workspace:*",
+    "@hono/node-server": "^2.1.0",
     "hono": "^4.8.0",
     "zod": "3.24.4"
   },
