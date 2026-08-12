@@ -40,7 +40,7 @@ import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
 import { createEventBus } from './services/event-bus.js'
 import type { FlutterEvent } from './services/event-bus.js'
-import { instrumentTools } from './tool-events.js'
+import { instrumentTools, llmTraceToBus } from './tool-events.js'
 
 export function createFlutterDevBff(options: {
   masterKey: string
@@ -103,7 +103,14 @@ export function createFlutterDevBff(options: {
     prompts,
     audit,
     maxSteps: 50,
-    ...(options.llmTrace ? { llmTrace: options.llmTrace } : {}),
+    ...(options.llmTrace
+      ? {
+          llmTrace: (event: LlmTraceEvent) => {
+            options.llmTrace?.(event)
+            llmTraceToBus(bus)(event)
+          },
+        }
+      : {}),
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
   for (const tool of instrumentTools(toolDefinitions, bus)) runtime.tools.register(tool)
