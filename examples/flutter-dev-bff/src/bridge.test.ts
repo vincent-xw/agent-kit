@@ -60,4 +60,23 @@ describe('flutter-dev-bff HTTP 桥接', () => {
     expect(res.status).toBe(401)
     expect((await res.json()).code).toBe('UNAUTHORIZED')
   })
+
+  it('只绑定 loopback，不监听全部网卡', async () => {
+    const bff = createFlutterDevBff({
+      masterKey,
+      apiToken: 'token-1',
+      flutterProjectPath: '/tmp/flutter-app',
+      databasePath: ':memory:',
+    })
+    await bff.ready
+    const { server } = await startFlutterDevBffServer((request) => bff.app.fetch(request), 0)
+    cleanups.push(() => {
+      server.close()
+      bff.database.close()
+    })
+
+    const address = server.address()
+    expect(typeof address).toBe('object')
+    expect((address as { address: string }).address).toBe('127.0.0.1')
+  })
 })

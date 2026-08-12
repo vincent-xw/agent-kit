@@ -148,7 +148,7 @@ export function startFlutterDevBffServer(
   port: number,
 ): Promise<{ server: ReturnType<typeof serve>; port: number }> {
   return new Promise((resolve) => {
-    const server = serve({ fetch: fetchHandler, port }, (info) => {
+    const server = serve({ fetch: fetchHandler, port, hostname: '127.0.0.1' }, (info) => {
       resolve({ server, port: info.port })
     })
   })
