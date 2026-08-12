@@ -67,6 +67,47 @@ let sessionId = localStorage.getItem('flutter_session_id') || ('sess-' + Date.no
 localStorage.setItem('flutter_session_id', sessionId);
 let running = false;
 
+// 工具事件实时流。EventSource 不支持自定义请求头，token 走查询参数。
+// 断线自动重连，重连时浏览器自动带上 Last-Event-ID，服务端据此重放断开期间的事件。
+const toolEls = new Map();
+
+function connectEvents() {
+  const es = new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}`);
+
+  es.addEventListener('tool_start', (e) => {
+    const data = JSON.parse(e.data);
+    const el = addToolMessage(data.name, '执行中…');
+    toolEls.set(data.name, el);
+  });
+
+  es.addEventListener('tool_end', (e) => {
+    const data = JSON.parse(e.data);
+    const el = toolEls.get(data.name);
+    const status = data.ok ? `完成 ${data.durationMs}ms` : `失败 ${data.durationMs}ms`;
+    const detail = data.ok ? data.output : data.error;
+    if (el) {
+      el.className = 'msg tool' + (data.ok ? '' : ' error');
+      el.innerHTML = `<div><span class="tool-name">${escapeHtml(data.name)}</span> <span class="tool-status">${escapeHtml(status)}</span></div>`
+        + (detail ? `<div class="tool-output">${escapeHtml(String(detail).slice(0, 500))}</div>` : '');
+      toolEls.delete(data.name);
+    } else {
+      addToolMessage(data.name, status, detail);
+    }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  es.onerror = () => {
+    // EventSource 会自行重连，这里只反映连接状态，不手动重建。
+    statusEl.textContent = running ? '思考中…（事件流重连中）' : '事件流重连中…';
+  };
+
+  es.onopen = () => {
+    if (!running) statusEl.textContent = '就绪';
+  };
+
+  return es;
+}
+
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
@@ -205,6 +246,10 @@ inputEl.addEventListener('input', () => {
     // No history or server not reachable yet
   }
 })();
+
+// 放在脚本末尾：connectEvents 的回调引用 messagesEl / statusEl 等 const，
+// 在它们声明之前调用会踩暂时性死区。
+connectEvents();
 </script>
 </body>
 </html>
