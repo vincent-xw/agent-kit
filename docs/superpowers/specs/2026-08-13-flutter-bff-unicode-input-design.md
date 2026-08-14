@@ -4,7 +4,7 @@
 
 让 `mobile_set_text` 兑现它自己已经声明的契约：替换而非追加、支持中文等非 ASCII 字符。
 
-实现方式是接入 ADBKeyBoard 输入法的 base64 广播通道，并在 Web UI 提供一键安装启用。
+实现方式是接入 ADBKeyBoard 输入法的 base64 广播通道。设备端的安装与切换由 Bash 脚本完成，不新增端点，不改动 Web UI。
 
 ## 背景：工具描述与实现不符
 
@@ -41,6 +41,20 @@ base64 编码顺带消除该问题：base64 字母表仅含 `A-Za-z0-9+/=`，不
 
 ## 设计决策
 
+### 提示走对话，不改 Web UI
+
+Agent 的聊天界面本身即交互界面。`setText` 失败时返回的错误信息会经模型转述进对话，出现的时机正是用户真正需要输入中文的那一刻，且此时提示信息最完整、最切题。
+
+因此不新增端点、不改动 Web UI。代价是提示为被动触发——用户尝试输入中文失败后才得知，而非打开页面即得知。取舍成立的理由：用户并非每次使用都需要输入中文，常驻横幅在多数时候是恒定噪音。
+
+### 设备端操作交给 Bash 脚本，状态存文件
+
+安装、启用、切换输入法都是一次性的设备运维操作，不属于 Agent 的运行时职责。用 Bash 脚本实现比经 BFF 端点转发更直接，也便于用户自行查看与修改。
+
+原输入法 id 存入 `.ime-previous` 文件。相比浏览器 localStorage：不受浏览器影响、BFF 重启不丢、换机器仍在。
+
+`examples/browser-extension-bff/deploy/` 下已有 `start.sh`、`pack.sh` 的先例，风格一致。
+
 ### 探测「当前激活」输入法，而非「已启用」列表
 
 `adb shell ime list -s` 列出的是已启用的输入法。ADBKeyBoard 的广播只在它是**当前激活**输入法时生效——它需要持有 InputConnection 才能把文本提交进焦点输入框。
@@ -65,39 +79,21 @@ adb shell settings get secure default_input_method
 
 同一条代码路径处理全部文本，减少分支组合；并顺带消除 ASCII 路径的注入面。代价是多一次广播，可忽略。
 
-### 不自动切换输入法，但提供一键安装
-
-切换默认输入法是全局操作，会影响用户在该设备上的日常打字。BFF 不得在用户不知情时修改设备状态。
-
-但通过 Web UI 的显式点击执行安装与切换是可接受的——**点击即授权**，与静默修改性质不同。
-
-### 记录并可还原原输入法
-
-一键安装会切换默认输入法。用户需要在该设备上正常打字，切换后必须能切回，且通常不记得原本是哪个输入法。
-
-因此 `ime-setup` 端点在切换前读取并返回原输入法 id，UI 展示该 id 并提供还原入口。
-
-### APK 由用户自行获取，不内置、不联网下载
+### APK 由用户自行获取
 
 ADBKeyBoard 使用 GPL-2.0 许可，发布资产为 `keyboardservice-debug.apk`（debug 签名，用于测试设备无妨）。
 
 内置到仓库会使 agent-kit 成为 GPL-2.0 二进制的分发者，需自行承担随附源码等合规义务。运行时下载则引入网络依赖与哈希维护负担（上游发新版即失配）。
 
-改由用户手动下载一次，通过 `.env` 的 `ADBKEYBOARD_APK_PATH` 指定路径。agent-kit 既不分发 GPL 二进制也不联网。
+改由用户手动下载一次，通过环境变量或脚本参数指定路径。agent-kit 既不分发 GPL 二进制也不联网。
 
 ## 组件设计
 
-### AdbClient 新增方法
+### AdbClient 新增三个方法
 
 ```
 getDefaultIme(): Promise<string>
   settings get secure default_input_method，返回值已 trim
-
-enableIme(imeId: string): Promise<void>
-  ime enable <imeId>
-
-setIme(imeId: string): Promise<void>
-  ime set <imeId>
 
 clearTextViaIme(): Promise<void>
   am broadcast -a ADB_CLEAR_TEXT
@@ -106,7 +102,7 @@ inputTextViaIme(text: string): Promise<void>
   文本 base64 编码后 am broadcast -a ADB_INPUT_B64 --es msg <base64>
 ```
 
-安装复用已有的 `install(apkPath)`。
+`ime enable` / `ime set` 不进 `AdbClient`——它们只被脚本使用，BFF 运行时不需要修改设备输入法。
 
 ### setText 重写
 
@@ -120,85 +116,63 @@ inputTextViaIme(text: string): Promise<void>
    ├─ 未激活 且 文本为 ASCII
    │    KEYCODE_MOVE_END → 发 node.text.length 次 KEYCODE_DEL → inputText(text)
    └─ 未激活 且 含非 ASCII
-        返回 ok:false，message 含安装指引
+        返回 ok:false，message 指向 setup 脚本
 ```
 
 降级路径的清空次数取自快照中已有的 `node.text` 长度，无需额外查询设备。
 
-非 ASCII 且输入法未激活时的错误消息须包含完整命令：
+非 ASCII 且输入法未激活时的错误消息须可直接执行，且说明这是一次性设置：
 
 ```
-adb install <你的路径>/keyboardservice-debug.apk
-adb shell ime enable com.android.adbkeyboard/.AdbIME
-adb shell ime set com.android.adbkeyboard/.AdbIME
+设备未启用 ADBKeyBoard 输入法，无法输入中文。请执行一次性设置：
+  pnpm --filter flutter-dev-bff ime:setup
+完成后重试即可。ASCII 文本不受影响。
 ```
 
-### 新增端点
+### Bash 脚本
 
-三者均沿用现有 Bearer token 鉴权。
+`examples/flutter-dev-bff/scripts/ime-setup.sh`：
 
-```
-GET /api/ime-status
-  → { activeIme, isAdbKeyboard, apkPathConfigured }
+1. 解析 APK 路径：环境变量 `ADBKEYBOARD_APK_PATH`，否则取第一个位置参数；两者都无则打印用法并退出。
+2. 读取当前 `default_input_method`，写入 `.ime-previous`（已是 ADBKeyBoard 时不覆盖该文件，避免把还原目标写成自己）。
+3. `adb install -r <apk>`。
+4. `adb shell ime enable com.android.adbkeyboard/.AdbIME`——安装后输入法可能需短暂时间才出现在系统列表，失败时等待 1 秒重试一次。
+5. `adb shell ime set com.android.adbkeyboard/.AdbIME`。
+6. 打印结果与原输入法 id。
 
-POST /api/ime-setup
-  → install → enable → set
-  → { ok, previousIme, activeIme }
+`examples/flutter-dev-bff/scripts/ime-restore.sh`：
 
-POST /api/ime-restore   body: { imeId }
-  → ime set <imeId>
-  → { ok, activeIme }
-```
+读取 `.ime-previous`，`adb shell ime set <id>`。文件不存在时打印提示并退出，不猜测还原目标。
 
-`previousIme` 由 Web UI 存入 localStorage，还原时回传给 `ime-restore`。服务端不持有该状态——BFF 重启或页面刷新都不应丢失还原能力，而把它放在服务端内存反而会丢。
+两个脚本挂为 package.json 的 `ime:setup` 与 `ime:restore`。均接受可选的设备序列号作为参数透传给 `adb -s`；未提供时依赖 adb 默认选择，多设备场景由 adb 自身报错。
 
-`ADBKEYBOARD_APK_PATH` 未配置时，`ime-status` 返回 `apkPathConfigured: false`，UI 提示配置路径而非展示安装按钮。
-
-安装后输入法可能需要短暂时间才出现在系统列表中，`ime-setup` 在 `enable` 失败时重试一次。
-
-### Web UI
-
-页面加载时请求 `ime-status`，按状态显示顶部横幅：
-
-- 未激活且已配置 APK 路径：`⚠ 未检测到 ADBKeyBoard，中文输入不可用` + 一键安装并启用按钮
-- 未激活且未配置路径：提示在 `.env` 中配置 `ADBKEYBOARD_APK_PATH`
-- 已激活：`✓ ADBKeyBoard 已激活（原输入法：<id>）` + 还原按钮
-
-原输入法 id 从 localStorage 读取。若 localStorage 中没有（例如换了浏览器，或输入法是用户手动切换的），只显示已激活状态，不显示还原按钮——不猜测该还原成哪个。
-
-无设备连接时 `ime-status` 无法探测，横幅不显示，不阻塞页面。
+`.ime-previous` 加入 `.gitignore`。
 
 ### 文案修正
 
-- [prompts.ts:21](../../../examples/flutter-dev-bff/src/prompts.ts:21) 关于「依赖 Companion App」的说明改为 ADBKeyBoard。
-- [flutter-tools.ts:183](../../../examples/flutter-dev-bff/src/flutter-tools.ts:183) 的描述改为如实表述：中文输入需设备已启用 ADBKeyBoard，失败时错误信息含配置指引。
+- [prompts.ts:21](../../../examples/flutter-dev-bff/src/prompts.ts:21) 关于「依赖 Companion App」的说明改为 ADBKeyBoard 与 setup 脚本。
+- [flutter-tools.ts:183](../../../examples/flutter-dev-bff/src/flutter-tools.ts:183) 的描述改为如实表述：中文输入需设备已启用 ADBKeyBoard，失败时错误信息含设置指引。
 
 ## 测试策略
 
 沿用 `uiautomator-provider.test.ts` 中手写 mock 对象的模式，新增方法补入 mock。
 
-setText：
-
 - 输入法已激活 + 中文 → 调用 `clearTextViaIme` 与 `inputTextViaIme`，**未调用** `inputText`
 - 输入法已激活 + ASCII → 同样走 base64 路径
 - 未激活 + ASCII → 走 `KEYCODE_MOVE_END` + `KEYCODE_DEL`×N + `inputText`
-- 未激活 + 中文 → 返回 `ok:false`，message 含三条安装命令
+- 未激活 + 中文 → 返回 `ok:false`，message 含 `ime:setup`
 - 清空调用发生在输入调用之前（顺序断言）
 - 中文文本的 base64 编码结果正确
 - `default_input_method` 返回空字符串或 `null` 时不抛异常，按未激活处理
 - ref 失效、节点非 editable → 各自的错误
 
-端点：
-
-- 三个端点无 token 返回 401
-- `ime-status` 在未配置 APK 路径时返回 `apkPathConfigured: false`
-- `ime-setup` 返回切换前的 `previousIme`
+Bash 脚本不写自动化测试：它们是一次性设备运维操作，依赖真实设备，且失败时输出直接可读。
 
 现有 171 个测试须保持通过。
 
 ## 范围之外
 
+- 新增 HTTP 端点或改动 Web UI。
 - 内置 APK 或运行时下载。
-- 自动切换输入法（仅经 UI 显式点击执行）。
 - Phase 4 Companion App。
 - `mobile_set_text` 之外的工具。
