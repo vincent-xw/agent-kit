@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "flutter-dev-bff",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "flutter-dev-bff", "start"],
+      "port": 8788
+    }
+  ]
+}
