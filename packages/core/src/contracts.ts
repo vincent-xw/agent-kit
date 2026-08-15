@@ -15,6 +15,7 @@ export type LlmResult =
 export type HarnessResult =
   | { type: 'final'; output: unknown; reasoning?: string }
   | { type: 'pending_tool_calls'; calls: Array<{ callId: string; toolName: string; input: unknown }> }
+  | { type: 'step_done' }
 
 /**
  * 会话消息。assistant 角色是必需的：缺少它模型看不到自己的上一轮输出与已发起的工具调用，

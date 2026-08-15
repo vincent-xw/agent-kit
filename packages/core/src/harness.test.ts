@@ -766,4 +766,184 @@ describe('按名选择提示词', () => {
     await harness.resume({ sessionId: 's-p6', callId: 'c1', output: { title: '首页' } })
     expect(seenPrompts).toEqual(['评估候选人', '评估候选人'])
   })
+
+  describe('stepMode', () => {
+    it('server 工具执行完一步后返回 step_done 并落库', async () => {
+      let callCount = 0
+      const tools = createToolRegistry()
+      tools.register({
+        name: 'ping',
+        execution: 'server',
+        input: z.object({}),
+        output: z.object({ pong: z.boolean() }),
+        execute: async () => {
+          callCount += 1
+          return { pong: true }
+        },
+      })
+      const sessions = createMemorySessionStore()
+      const harness = createAgentHarness({
+        llm: {
+          complete: async () =>
+            callsOf({ callId: 'c-ping', toolName: 'ping', input: {} }),
+        },
+        sessions,
+        tools,
+        maxSteps: 5,
+      })
+
+      const result = await harness.run({
+        sessionId: 's-step',
+        input: 'ping 一下',
+        context: {},
+        stepMode: true,
+      })
+
+      expect(result).toEqual({ type: 'step_done' })
+      expect(callCount).toBe(1)
+      const stored = await sessions.load('s-step')
+      expect(stored.some((m) => m.role === 'tool')).toBe(true)
+      expect(stored.some((m) => m.role === 'assistant' && (m as { toolCalls?: unknown }).toolCalls)).toBe(true)
+    })
+
+    it('不传 stepMode 时行为不变，循环跑到 final', async () => {
+      const tools = createToolRegistry()
+      tools.register({
+        name: 'ping',
+        execution: 'server',
+        input: z.object({}),
+        output: z.object({ pong: z.boolean() }),
+        execute: async () => ({ pong: true }),
+      })
+      let responses = 0
+      const harness = createAgentHarness({
+        llm: {
+          complete: async () => {
+            responses += 1
+            return responses === 1
+              ? callsOf({ callId: 'c-ping', toolName: 'ping', input: {} })
+              : { type: 'final', output: 'pong' }
+          },
+        },
+        sessions: createMemorySessionStore(),
+        tools,
+        maxSteps: 5,
+      })
+
+      const result = await harness.run({ sessionId: 's-normal', input: 'x', context: {} })
+
+      expect(result).toEqual({ type: 'final', output: 'pong' })
+      expect(responses).toBe(2)
+    })
+
+    it('stepMode 不影响 remote 工具（仍返回 pending_tool_calls）', async () => {
+      const tools = createToolRegistry()
+      tools.register({
+        name: 'remote_thing',
+        execution: 'remote',
+        input: z.object({}),
+        output: z.object({}),
+      })
+      const harness = createAgentHarness({
+        llm: {
+          complete: async () =>
+            callsOf({ callId: 'c-r', toolName: 'remote_thing', input: {} }),
+        },
+        sessions: createMemorySessionStore(),
+        tools,
+        maxSteps: 5,
+      })
+
+      const result = await harness.run({
+        sessionId: 's-remote',
+        input: 'x',
+        context: {},
+        stepMode: true,
+      })
+
+      expect(result.type).toBe('pending_tool_calls')
+    })
+
+    it('continue 推进到下一步，可多次调用直到 final', async () => {
+      const tools = createToolRegistry()
+      let n = 0
+      tools.register({
+        name: 'inc',
+        execution: 'server',
+        input: z.object({}),
+        output: z.object({ n: z.number() }),
+        execute: async () => ({ n: ++n }),
+      })
+      let modelCalls = 0
+      const sessions = createMemorySessionStore()
+      const harness = createAgentHarness({
+        llm: {
+          complete: async () => {
+            modelCalls += 1
+            return modelCalls < 3
+              ? callsOf({ callId: 'c-' + modelCalls, toolName: 'inc', input: {} })
+              : { type: 'final', output: 'done' }
+          },
+        },
+        sessions,
+        tools,
+        maxSteps: 10,
+      })
+
+      const first = await harness.run({ sessionId: 's-cont', input: '开始', context: {}, stepMode: true })
+      expect(first).toEqual({ type: 'step_done' })
+
+      const second = await harness.continue({ sessionId: 's-cont' })
+      expect(second).toEqual({ type: 'step_done' })
+
+      const third = await harness.continue({ sessionId: 's-cont' })
+      expect(third).toEqual({ type: 'final', output: 'done' })
+
+      expect(n).toBe(2)
+    })
+
+    it('continue 带 input 时作为中途注入消息发给模型并并入历史', async () => {
+      const tools = createToolRegistry()
+      tools.register({
+        name: 'noop',
+        execution: 'server',
+        input: z.object({}),
+        output: z.object({}),
+        execute: async () => ({}),
+      })
+      const seenInputs: unknown[] = []
+      const sessions = createMemorySessionStore()
+      const harness = createAgentHarness({
+        llm: {
+          complete: async (req) => {
+            // 注入消息通过 input 参数传递（首轮用户输入同理）
+            seenInputs.push(req.input)
+            return { type: 'final', output: 'ok' }
+          },
+        },
+        sessions,
+        tools,
+        maxSteps: 5,
+      })
+
+      await harness.run({ sessionId: 's-inj', input: '初始任务', context: {}, stepMode: true })
+      await harness.continue({ sessionId: 's-inj', input: '换个方向' })
+
+      expect(seenInputs).toContain('初始任务')
+      expect(seenInputs).toContain('换个方向')
+    })
+
+    it('continue 在没有 stepMode 历史的会话上也能工作（防御性）', async () => {
+      const sessions = createMemorySessionStore()
+      const harness = createAgentHarness({
+        llm: { complete: async () => ({ type: 'final', output: '直接完成' }) },
+        sessions,
+        tools: createToolRegistry(),
+        maxSteps: 3,
+      })
+
+      const result = await harness.continue({ sessionId: 's-empty' })
+      expect(result).toEqual({ type: 'final', output: '直接完成' })
+    })
+  })
 })

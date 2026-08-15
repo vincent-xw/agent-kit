@@ -44,9 +44,21 @@ export interface AgentHarness {
     promptName?: string
     /** 跳过工具声明：不发 tools 字段，模型只能输出文本。用于计划阶段。 */
     skipTools?: boolean
+    /** 分步模式：每执行完一轮 server 工具即返回 step_done，由调用方推进。 */
+    stepMode?: boolean
   }): Promise<HarnessResult>
   /** 回填远端 Tool Host 执行结果并继续循环。 */
   resume(request: { sessionId: string; callId: string; output: unknown }): Promise<HarnessResult>
+  /**
+   * 分步模式下推进下一步。不要求 callId（区别于 resume）。
+   * input 可选：提供时作为中途注入的用户消息（steering）。
+   */
+  continue(request: {
+    sessionId: string
+    context?: Record<string, unknown>
+    input?: string
+    promptName?: string
+  }): Promise<HarnessResult>
 }
 
 /** 校验 Zod Schema，失败时统一抛出带稳定错误码的 AgentKitError。 */
@@ -147,6 +159,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
     history: SessionMessage[],
     promptName?: string,
     skipTools?: boolean,
+    stepMode?: boolean,
   ): Promise<HarnessResult> {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
     // 本次用户输入在首轮发出后即并入历史，避免后续轮次重复追加。
@@ -246,6 +259,12 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         await deps.sessions.save(sessionId, history)
         return { type: 'pending_tool_calls', calls: remoteCalls }
       }
+      if (stepMode) {
+        // 当前 server 路径执行完工具后不存盘即进入下一轮；stepMode 在此返回，
+        // 不存盘会导致 continue 从 store 读到旧历史，丢失这一步的工具结果。
+        await deps.sessions.save(sessionId, history)
+        return { type: 'step_done' }
+      }
     }
     throw new AgentKitError('HARNESS_STEP_LIMIT', `工具调用超过最大步数：${deps.maxSteps}`)
   }
@@ -301,7 +320,21 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         await deps.sessions.save(request.sessionId, sanitized)
         history = sanitized
       }
-      return runLoop(request.sessionId, request.input, request.context, history, request.promptName, request.skipTools)
+      return runLoop(request.sessionId, request.input, request.context, history, request.promptName, request.skipTools, request.stepMode)
+    },
+    async continue(request) {
+      const history: SessionMessage[] = [...(await deps.sessions.load(request.sessionId))]
+      // 不调用 sanitizeIncompleteRounds：stepMode 落库的是完整 server 工具轮次，
+      // 不存在残破 assistant 消息；裁剪反而会误删上一步的工具结果。
+      return runLoop(
+        request.sessionId,
+        request.input ?? '',
+        request.context ?? {},
+        history,
+        request.promptName,
+        undefined,
+        true,
+      )
     },
     async resume(request) {
       const pending = await pendingCalls.get(request.callId)
