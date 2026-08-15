@@ -148,6 +148,18 @@ export class AdbClient {
     return this.execWithDevice(deviceSerial, ['logcat', '-d', '-t', String(lines)], { timeoutMs: 10_000 })
   }
 
+  async listWebViewSockets(deviceSerial?: string): Promise<string[]> {
+    const output = await this.shell('cat', ['/proc/net/unix'], deviceSerial)
+    const names: string[] = []
+    for (const line of output.split('\n')) {
+      const parts = line.trim().split(/\s+/)
+      const last = parts[parts.length - 1]
+      if (!last || !last.startsWith('@webview_devtools_remote_')) continue
+      names.push(last.slice(1))
+    }
+    return names
+  }
+
   async dumpUiHierarchy(deviceSerial?: string): Promise<string> {
     const serial = deviceSerial ?? (await this.getDefaultSerial())
     const remotePath = '/sdcard/agent_ui_dump.xml'
