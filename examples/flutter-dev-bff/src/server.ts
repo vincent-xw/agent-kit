@@ -39,6 +39,7 @@ import { FlutterProcessManager } from './services/flutter-process-manager.js'
 import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
 import { createEventBus } from './services/event-bus.js'
+import { CdpClient } from './services/webview/cdp-client.js'
 import type { FlutterEvent } from './services/event-bus.js'
 import { instrumentTools, llmTraceToBus } from './tool-events.js'
 
@@ -64,6 +65,7 @@ export function createFlutterDevBff(options: {
 
   const adb = new AdbClient()
   const device = new UiAutomatorDumpProvider(adb)
+  const webView = new CdpClient(adb)
   const flutter = new FlutterProcessManager({ projectPath: options.flutterProjectPath })
   const screenshots = new ScreenshotStore(screenshotDir)
 
@@ -88,6 +90,7 @@ export function createFlutterDevBff(options: {
     },
     screenshots,
     projectPath: options.flutterProjectPath,
+    webView,
   })
 
   const bus = createEventBus()

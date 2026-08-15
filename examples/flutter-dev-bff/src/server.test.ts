@@ -90,6 +90,7 @@ describe('flutter-dev-bff 工具执行', () => {
       vm: {} as never,
       screenshots: {} as never,
       projectPath: '/tmp',
+      webView: {} as never,
     })
     for (const tool of tools) {
       expect(() => toToolSchema(tool), tool.name).not.toThrow()

@@ -86,3 +86,27 @@ describe('AdbClient.inputTextViaIme', () => {
     expect(encoded).toMatch(/^[A-Za-z0-9+/=]+$/)
   })
 })
+
+describe('AdbClient.listWebViewSockets', () => {
+  it('解析 /proc/net/unix 并去掉 @ 前缀', async () => {
+    const { client, shell } = clientWithSpy()
+    shell.mockResolvedValue([
+      'Num       RefCount Protocol Flags    Type St Inode Path',
+      '0000000000000000: 00000002 00000000 00010000 0001 01 12345 @webview_devtools_remote_12345',
+      '0000000000000000: 00000002 00000000 00010000 0001 01 12346 @webview_devtools_remote_67890',
+      '0000000000000000: 00000002 00000000 00010000 0001 01 12347 @android_webview_devtools_remote',
+      '0000000000000000: 00000002 00000000 00010000 0001 01 12348 @something_else',
+    ].join('\n'))
+
+    await expect(client.listWebViewSockets()).resolves.toEqual([
+      'webview_devtools_remote_12345',
+      'webview_devtools_remote_67890',
+    ])
+  })
+
+  it('无匹配时返回空数组', async () => {
+    const { client, shell } = clientWithSpy()
+    shell.mockResolvedValue('Num RefCount ... Path\n@other_socket\n')
+    await expect(client.listWebViewSockets()).resolves.toEqual([])
+  })
+})
