@@ -180,7 +180,7 @@ function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
     {
       name: 'mobile_set_text',
       execution: 'server',
-      description: '向可编辑节点设置文本（替换原有内容）。优先使用此工具输入文本，它支持中文等非 ASCII 字符。',
+      description: '向可编辑节点设置文本，会先清空原有内容再输入。优先使用此工具而非坐标操作。中文等非 ASCII 文本需要设备已启用 ADBKeyBoard 输入法；未启用时本工具会返回包含设置命令的错误信息，ASCII 文本不受影响。',
       input: z.object({
         ref: z.number().int(),
         text: z.string().describe('要设置的完整文本'),

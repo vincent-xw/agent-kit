@@ -30,6 +30,9 @@ function mockAdb(): AdbClient {
     forward: vi.fn(async () => {}),
     removeForward: vi.fn(async () => {}),
     logcatTail: vi.fn(async () => ''),
+    getDefaultIme: vi.fn(async () => ''),
+    clearTextViaIme: vi.fn(async () => {}),
+    inputTextViaIme: vi.fn(async () => {}),
   } as unknown as AdbClient
 }
 
@@ -92,5 +95,112 @@ describe('UiAutomatorDumpProvider', () => {
     const result = await provider.tapNode(999)
     expect(result.ok).toBe(false)
     expect(result.message).toContain('过期')
+  })
+})
+
+describe('UiAutomatorDumpProvider.setText', () => {
+  async function providerWithEditable(adb: AdbClient) {
+    const provider = new UiAutomatorDumpProvider(adb)
+    const snapshot = await provider.snapshot()
+    const editable = snapshot.nodes.find((n) => n.editable)
+    return { provider, ref: editable!.ref }
+  }
+
+  it('ADBKeyBoard 激活时走 base64 广播，不调用 inputText', async () => {
+    const adb = mockAdb()
+    vi.mocked(adb.getDefaultIme).mockResolvedValue('com.android.adbkeyboard/.AdbIME')
+    const { provider, ref } = await providerWithEditable(adb)
+
+    const result = await provider.setText(ref, '杭州')
+
+    expect(result.ok).toBe(true)
+    expect(adb.clearTextViaIme).toHaveBeenCalled()
+    expect(adb.inputTextViaIme).toHaveBeenCalledWith('杭州')
+    expect(adb.inputText).not.toHaveBeenCalled()
+  })
+
+  it('ADBKeyBoard 激活时 ASCII 也走 base64', async () => {
+    const adb = mockAdb()
+    vi.mocked(adb.getDefaultIme).mockResolvedValue('com.android.adbkeyboard/.AdbIME')
+    const { provider, ref } = await providerWithEditable(adb)
+
+    await provider.setText(ref, 'hangzhou')
+
+    expect(adb.inputTextViaIme).toHaveBeenCalledWith('hangzhou')
+    expect(adb.inputText).not.toHaveBeenCalled()
+  })
+
+  it('清空发生在输入之前', async () => {
+    const adb = mockAdb()
+    vi.mocked(adb.getDefaultIme).mockResolvedValue('com.android.adbkeyboard/.AdbIME')
+    const order: string[] = []
+    vi.mocked(adb.clearTextViaIme).mockImplementation(async () => { order.push('clear') })
+    vi.mocked(adb.inputTextViaIme).mockImplementation(async () => { order.push('input') })
+    const { provider, ref } = await providerWithEditable(adb)
+
+    await provider.setText(ref, '杭州')
+
+    expect(order).toEqual(['clear', 'input'])
+  })
+
+  it('未激活且文本为 ASCII 时降级：MOVE_END + DEL + input text', async () => {
+    const adb = mockAdb()
+    vi.mocked(adb.getDefaultIme).mockResolvedValue('com.baidu.input/.ImeService')
+    const { provider, ref } = await providerWithEditable(adb)
+
+    const result = await provider.setText(ref, 'hello')
+
+    expect(result.ok).toBe(true)
+    expect(adb.inputText).toHaveBeenCalledWith('hello')
+    expect(adb.inputTextViaIme).not.toHaveBeenCalled()
+    const shellCalls = vi.mocked(adb.shell).mock.calls
+    expect(shellCalls.some((c) => c[1]?.includes('KEYCODE_MOVE_END'))).toBe(true)
+  })
+
+  it('未激活且含非 ASCII 时返回可执行的设置指引', async () => {
+    const adb = mockAdb()
+    vi.mocked(adb.getDefaultIme).mockResolvedValue('com.baidu.input/.ImeService')
+    const { provider, ref } = await providerWithEditable(adb)
+
+    const result = await provider.setText(ref, '杭州')
+
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('pnpm --filter flutter-dev-bff ime:setup')
+    expect(adb.inputText).not.toHaveBeenCalled()
+    expect(adb.inputTextViaIme).not.toHaveBeenCalled()
+  })
+
+  it('探测返回空字符串时按未激活处理，ASCII 仍可输入', async () => {
+    const adb = mockAdb()
+    vi.mocked(adb.getDefaultIme).mockResolvedValue('')
+    const { provider, ref } = await providerWithEditable(adb)
+
+    const result = await provider.setText(ref, 'hello')
+
+    expect(result.ok).toBe(true)
+    expect(adb.inputText).toHaveBeenCalledWith('hello')
+  })
+
+  it('ref 失效时报错且不碰设备', async () => {
+    const adb = mockAdb()
+    const provider = new UiAutomatorDumpProvider(adb)
+
+    const result = await provider.setText(999, 'hello')
+
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('重新 mobile_snapshot')
+    expect(adb.tap).not.toHaveBeenCalled()
+  })
+
+  it('目标节点不可编辑时报错', async () => {
+    const adb = mockAdb()
+    const provider = new UiAutomatorDumpProvider(adb)
+    const snapshot = await provider.snapshot()
+    const notEditable = snapshot.nodes.find((n) => !n.editable)
+
+    const result = await provider.setText(notEditable!.ref, 'hello')
+
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('不是可编辑输入框')
   })
 })

@@ -18,7 +18,7 @@ export const freeFormPrompt = [
   '',
   '注意事项：',
   '- mobile_screenshot 截图对用户可见，但你看不到图片内容。理解屏幕状态请用 mobile_snapshot。',
-  '- 中文等非 ASCII 文本输入依赖设备 Companion App。如果 set_text 提示不支持，说明当前使用的是 uiautomator 降级模式。',
+  '- 中文等非 ASCII 文本输入需要设备启用 ADBKeyBoard 输入法。如果 mobile_set_text 报未启用，把它的错误信息原样告诉用户，其中包含一次性设置命令。ASCII 文本无需该输入法。',
   '- 如果没有已连接设备，mobile_devices 会返回空列表。请先连接设备或启动模拟器。',
   '- 设备屏幕坐标原点在左上角。',
   '- 不要假装操作成功了——如果工具返回错误，读取错误信息并调整策略。',
