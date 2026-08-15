@@ -1,6 +1,6 @@
 import { AgentKitError } from '@agent-kit/core'
 import type { AgentHarness } from '@agent-kit/core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { createAgentBff } from './index.js'
 
@@ -82,6 +82,71 @@ describe('Agent BFF', () => {
     const text = await response.text()
     expect(text).not.toContain('prompt-secret-content')
     expect(text).not.toContain('sk-leaked-value')
+  })
+
+  it('/run 接收 stepMode 并透传给 harness', async () => {
+    const run = vi.fn(async () => ({ type: 'step_done' as const }))
+    const app = createAgentBff({
+      harness: { run, resume: vi.fn() } as unknown as AgentHarness,
+      authenticate: async () => ({ subject: 'user-1' }),
+    })
+    const response = await app.request('/v1/agent/sessions/s-1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: 'x', context: {}, stepMode: true }),
+    })
+    expect(response.status).toBe(200)
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ stepMode: true }))
+  })
+
+  it('stepMode 非布尔值返回 400', async () => {
+    const app = createAgentBff({ harness: createHarness(), authenticate: async () => ({ subject: 'user-1' }) })
+    const response = await app.request('/v1/agent/sessions/s-1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: 'x', context: {}, stepMode: 'yes' }),
+    })
+    expect(response.status).toBe(400)
+  })
+
+  it('POST /continue 无 input 时推进下一步', async () => {
+    const continueFn = vi.fn(async () => ({ type: 'step_done' as const }))
+    const app = createAgentBff({
+      harness: { run: vi.fn(), resume: vi.fn(), continue: continueFn } as unknown as AgentHarness,
+      authenticate: async () => ({ subject: 'user-1' }),
+    })
+    const response = await app.request('/v1/agent/sessions/s-1/continue', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ context: {} }),
+    })
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ type: 'step_done' })
+    expect(continueFn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'user-1:s-1' }))
+  })
+
+  it('POST /continue 带 input 时透传注入消息', async () => {
+    const continueFn = vi.fn(async () => ({ type: 'final', output: 'ok' }))
+    const app = createAgentBff({
+      harness: { run: vi.fn(), resume: vi.fn(), continue: continueFn } as unknown as AgentHarness,
+      authenticate: async () => ({ subject: 'user-1' }),
+    })
+    await app.request('/v1/agent/sessions/s-1/continue', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ context: {}, input: '换个方向' }),
+    })
+    expect(continueFn).toHaveBeenCalledWith(expect.objectContaining({ input: '换个方向' }))
+  })
+
+  it('POST /continue 鉴权失败返回 401', async () => {
+    const app = createAgentBff({ harness: createHarness(), authenticate: async () => null })
+    const response = await app.request('/v1/agent/sessions/s-1/continue', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ context: {} }),
+    })
+    expect(response.status).toBe(401)
   })
 })
 

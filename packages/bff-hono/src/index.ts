@@ -33,7 +33,7 @@ export function createAgentBff(options: {
         audit(requestId, 'run', startedAt, 'UNAUTHORIZED')
         return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
       }
-      const body = await context.req.json<{ input?: unknown; context?: unknown; promptName?: unknown; skipTools?: unknown }>()
+      const body = await context.req.json<{ input?: unknown; context?: unknown; promptName?: unknown; skipTools?: unknown; stepMode?: unknown }>()
       if (typeof body.input !== 'string' || !body.input.trim() || !body.context || typeof body.context !== 'object' || Array.isArray(body.context)) {
         audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: '请求参数不合法' }, 400)
@@ -46,6 +46,10 @@ export function createAgentBff(options: {
         audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
         return context.json({ code: 'REQUEST_INVALID', requestId, message: 'skipTools 必须是布尔值' }, 400)
       }
+      if (body.stepMode !== undefined && typeof body.stepMode !== 'boolean') {
+        audit(requestId, 'run', startedAt, 'REQUEST_INVALID')
+        return context.json({ code: 'REQUEST_INVALID', requestId, message: 'stepMode 必须是布尔值' }, 400)
+      }
       // 把已认证主体绑定到 session namespace，防止跨用户读取同一 sessionId 的上下文。
       const scopedSessionId = `${identity.subject}:${context.req.param('sessionId')}`
       const result = await options.harness.run({
@@ -54,6 +58,7 @@ export function createAgentBff(options: {
         context: body.context as Record<string, unknown>,
         ...(body.promptName ? { promptName: body.promptName } : {}),
         ...(body.skipTools === true ? { skipTools: true } : {}),
+        ...(body.stepMode === true ? { stepMode: true } : {}),
       })
       audit(requestId, `run:${result.type}`, startedAt)
       return context.json(result)
@@ -62,6 +67,45 @@ export function createAgentBff(options: {
       audit(requestId, 'run', startedAt, payload.code)
       // message 里可能带端点返回的具体原因（例如 LLM 400 的错误描述），
       // 这对排查是必需的，所以单独打一行完整信息到 stderr。
+      options.audit?.log({ requestId, durationMs: 0, errorCode: payload.message })
+      return context.json(payload, 500)
+    }
+  })
+
+  app.post('/v1/agent/sessions/:sessionId/continue', async (context) => {
+    const requestId = `req-${Math.random().toString(36).slice(2)}`
+    const startedAt = Date.now()
+    try {
+      const identity = await options.authenticate(context.req.raw)
+      if (!identity) {
+        audit(requestId, 'continue', startedAt, 'UNAUTHORIZED')
+        return context.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
+      }
+      const body = await context.req.json<{ input?: unknown; context?: unknown; promptName?: unknown }>()
+      if (!body.context || typeof body.context !== 'object' || Array.isArray(body.context)) {
+        audit(requestId, 'continue', startedAt, 'REQUEST_INVALID')
+        return context.json({ code: 'REQUEST_INVALID', requestId, message: '请求参数不合法' }, 400)
+      }
+      if (body.input !== undefined && (typeof body.input !== 'string' || !body.input.trim())) {
+        audit(requestId, 'continue', startedAt, 'REQUEST_INVALID')
+        return context.json({ code: 'REQUEST_INVALID', requestId, message: 'input 若提供必须是非空字符串' }, 400)
+      }
+      if (body.promptName !== undefined && typeof body.promptName !== 'string') {
+        audit(requestId, 'continue', startedAt, 'REQUEST_INVALID')
+        return context.json({ code: 'REQUEST_INVALID', requestId, message: 'promptName 必须是字符串' }, 400)
+      }
+      const scopedSessionId = `${identity.subject}:${context.req.param('sessionId')}`
+      const result = await options.harness.continue({
+        sessionId: scopedSessionId,
+        context: body.context as Record<string, unknown>,
+        ...(typeof body.input === 'string' ? { input: body.input } : {}),
+        ...(body.promptName ? { promptName: body.promptName } : {}),
+      })
+      audit(requestId, `continue:${result.type}`, startedAt)
+      return context.json(result)
+    } catch (error) {
+      const payload = toErrorPayload(error, requestId)
+      audit(requestId, 'continue', startedAt, payload.code)
       options.audit?.log({ requestId, durationMs: 0, errorCode: payload.message })
       return context.json(payload, 500)
     }
