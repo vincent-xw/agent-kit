@@ -84,13 +84,13 @@ function autoDrain(
       if (seen.has(sent.id)) continue
       seen.add(sent.id)
       const expr = sent.params?.expression ?? ''
-      // CDP Runtime.evaluate 的 result 是 { result: { type, value } }，两层 result
+      // p.resolve(msg.result)，所以 respond 的 payload 是 CDP result 字段本身：{ result: { type, value } }
       if (sent.method === 'Runtime.evaluate' && expr === 'window.devicePixelRatio') {
-        ws.respond(sent.id, { result: { result: { value: dpr } } })
+        ws.respond(sent.id, { result: { value: dpr } })
       } else if (sent.method === 'Runtime.evaluate' && expr.includes('document.querySelectorAll')) {
-        ws.respond(sent.id, { result: { result: { value: JSON.stringify(elements) } } })
+        ws.respond(sent.id, { result: { value: JSON.stringify(elements) } })
       } else if (sent.method === 'Runtime.evaluate' && expr.includes('getBoundingClientRect')) {
-        ws.respond(sent.id, { result: { result: { value: rect } } })
+        ws.respond(sent.id, { result: { value: rect } })
       } else {
         ws.respond(sent.id, {})
       }
@@ -144,10 +144,11 @@ describe('CdpClient', () => {
 
     await cdp.tap(1)
     stop()
-    const mouseEvents = ws.sent.filter((m) => (m as { method: string }).method === 'Input.dispatchMouseEvent')
-    expect(mouseEvents).toHaveLength(2)
-    expect((mouseEvents[0] as { params: { type: string; x: number; y: number } }).params).toMatchObject({ type: 'mousePressed', x: 100, y: 40 })
-    expect((mouseEvents[1] as { params: { type: string } }).params.type).toBe('mouseReleased')
+    const clickEval = ws.sent.find((m) => {
+      const sent = m as { method: string; params?: { expression?: string } }
+      return sent.method === 'Runtime.evaluate' && sent.params?.expression?.includes('.click()')
+    })
+    expect(clickEval).toBeTruthy()
   })
 
   it('setText 聚焦清空后 insertText', async () => {
@@ -160,9 +161,11 @@ describe('CdpClient', () => {
 
     await cdp.setText(1, '杭州')
     stop()
-    const insert = ws.sent.find((m) => (m as { method: string }).method === 'Input.insertText')
-    expect(insert).toBeTruthy()
-    expect((insert as { params: { text: string } }).params.text).toBe('杭州')
+    const setEval = ws.sent.find((m) => {
+      const sent = m as { method: string; params?: { expression?: string } }
+      return sent.method === 'Runtime.evaluate' && sent.params?.expression?.includes('el.value') && sent.params?.expression?.includes('杭州')
+    })
+    expect(setEval).toBeTruthy()
   })
 
   it('ref 失效时报错', async () => {

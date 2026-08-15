@@ -123,10 +123,10 @@ export class CdpClient {
     await this.ensure()
     const conn = this.conn!
     const dprResult = await conn.send('Runtime.evaluate', { expression: 'window.devicePixelRatio', returnByValue: true })
-    this.devicePixelRatio = Number((dprResult as { result?: { result?: { value?: number } } }).result?.result?.value ?? 1)
+    this.devicePixelRatio = Number((dprResult as { result?: { value?: number } }).result?.value ?? 1)
 
     const scanResult = await conn.send('Runtime.evaluate', { expression: SCAN_JS, returnByValue: true })
-    const json = (scanResult as { result?: { result?: { value?: string } } }).result?.result?.value ?? '[]'
+    const json = (scanResult as { result?: { value?: string } }).result?.value ?? '[]'
     const elements: DomElement[] = JSON.parse(json)
     const { nodes } = domToNodes(elements, { devicePixelRatio: this.devicePixelRatio })
 
@@ -148,21 +148,20 @@ export class CdpClient {
   async tap(ref: number): Promise<void> {
     await this.ensure()
     const selector = this.requireSelector(ref)
-    const box = await this.eval<{ x: number; y: number; width: number; height: number }>(
-      `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.left,y:r.top,width:r.width,height:r.height}; })()`,
+    // 移动 WebView 上 Input.dispatchMouseEvent 不一定触发 click（触摸 vs 鼠标模型），
+    // 对有 selector 的元素直接调用 .click() 最可靠。
+    await this.eval(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error('element not found'); el.click(); })()`,
     )
-    const x = (box.x + box.width / 2) * this.devicePixelRatio
-    const y = (box.y + box.height / 2) * this.devicePixelRatio
-    await this.conn!.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
-    await this.conn!.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
   }
 
   async setText(ref: number, text: string): Promise<void> {
     await this.ensure()
     const selector = this.requireSelector(ref)
-    // 聚焦并清空
-    await this.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.focus(); el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); })()`)
-    await this.conn!.send('Input.insertText', { text })
+    // 直接设值并触发 input/change 事件，比 Input.insertText 在移动 WebView 上更可靠。
+    await this.eval(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error('element not found'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+    )
   }
 
   async scroll(ref: number, direction: 'forward' | 'backward'): Promise<void> {
@@ -187,7 +186,8 @@ export class CdpClient {
 
   private async eval<T>(expression: string): Promise<T> {
     const result = await this.conn!.send('Runtime.evaluate', { expression, returnByValue: true })
-    return (result as { result?: { result?: { value?: T } } }).result?.result?.value as T
+    // conn.send 已解包 CDP 的 result 字段，这里 result 是 { type, value }
+    return (result as { result?: { value?: T } }).result?.value as T
   }
 
   private async ensure(): Promise<void> {
