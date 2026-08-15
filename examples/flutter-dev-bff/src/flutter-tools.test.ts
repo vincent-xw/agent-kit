@@ -5,6 +5,7 @@ import type { FlutterToolServices } from './flutter-tools.js'
 import { AdbClient } from './services/adb-client.js'
 import { FlutterProcessManager } from './services/flutter-process-manager.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
+import type { CdpClient } from './services/webview/cdp-client.js'
 
 const mockServices: FlutterToolServices = {
   adb: {
@@ -23,6 +24,7 @@ const mockServices: FlutterToolServices = {
     logcatTail: async () => '',
     dumpUiHierarchy: async () => '',
     shell: async () => '',
+    listWebViewSockets: async () => [],
   } as unknown as AdbClient,
   device: {
     snapshot: async () => ({ snapshotId: 'test', packageName: 'com.test', screenWidth: 1080, screenHeight: 1920, nodes: [] }),
@@ -51,6 +53,14 @@ const mockServices: FlutterToolServices = {
     getPath: () => '/tmp/test.png',
   } as unknown as ScreenshotStore,
   projectPath: '/tmp/flutter-app',
+  webView: {
+    isAvailable: async () => false,
+    snapshot: async () => ({ snapshotId: 'w', packageName: 'webview', screenWidth: 0, screenHeight: 0, nodes: [] }),
+    tap: async () => {},
+    setText: async () => {},
+    scroll: async () => {},
+    dispose: async () => {},
+  } as unknown as CdpClient,
 }
 
 const tools = createFlutterToolDefinitions(mockServices)
@@ -99,6 +109,18 @@ describe('Flutter 工具定义', () => {
     expect(names).toContain('flutter_analyze')
     expect(names).toContain('flutter_test')
     expect(names).toContain('flutter_eval')
+    expect(names).toContain('web_snapshot')
+    expect(names).toContain('web_tap')
+    expect(names).toContain('web_set_text')
+    expect(names).toContain('web_scroll')
+  })
+
+  it('web_snapshot 在 WebView 不可用时返回明确错误', async () => {
+    const webSnap = tools.find((t) => t.name === 'web_snapshot')!
+    const execute = webSnap.execute!
+    const result = await execute({}, {} as never)
+    expect(result).toMatchObject({ ok: false })
+    expect((result as { message: string }).message).toContain('未检测到可调试的 WebView')
   })
 
   it('tap_node 和 set_text 接受 ref', () => {

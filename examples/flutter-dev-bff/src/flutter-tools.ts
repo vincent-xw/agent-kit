@@ -7,6 +7,7 @@ import type { SnapshotProvider } from './services/device-provider.js'
 import type { FlutterProcessManager } from './services/flutter-process-manager.js'
 import type { VmServiceClient } from './services/vm-service-client.js'
 import type { ScreenshotStore } from './services/screenshot-store.js'
+import type { CdpClient } from './services/webview/cdp-client.js'
 import type { AndroidKey } from './types.js'
 
 const execFileAsync = promisify(execFile)
@@ -22,6 +23,7 @@ export interface FlutterToolServices {
   }
   screenshots: ScreenshotStore
   projectPath: string
+  webView: CdpClient
 }
 
 function createDeviceTools(svc: FlutterToolServices): ToolDefinition[] {
@@ -126,23 +128,23 @@ function createDeviceTools(svc: FlutterToolServices): ToolDefinition[] {
   ]
 }
 
-function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
-  const nodeSchema = z.object({
-    ref: z.number(),
-    bounds: z.object({ left: z.number(), top: z.number(), right: z.number(), bottom: z.number() }),
-    clickable: z.boolean(),
-    scrollable: z.boolean(),
-    editable: z.boolean(),
-    enabled: z.boolean(),
-    focused: z.boolean(),
-    text: z.string().optional(),
-    contentDescription: z.string().optional(),
-    className: z.string().optional(),
-    resourceId: z.string().optional(),
-    checked: z.boolean().optional(),
-    selected: z.boolean().optional(),
-  })
+const nodeSchema = z.object({
+  ref: z.number(),
+  bounds: z.object({ left: z.number(), top: z.number(), right: z.number(), bottom: z.number() }),
+  clickable: z.boolean(),
+  scrollable: z.boolean(),
+  editable: z.boolean(),
+  enabled: z.boolean(),
+  focused: z.boolean(),
+  text: z.string().optional(),
+  contentDescription: z.string().optional(),
+  className: z.string().optional(),
+  resourceId: z.string().optional(),
+  checked: z.boolean().optional(),
+  selected: z.boolean().optional(),
+})
 
+function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
   return [
     {
       name: 'mobile_snapshot',
@@ -296,6 +298,85 @@ function createCoordinateTools(svc: FlutterToolServices): ToolDefinition[] {
         }
         await svc.adb.swipe(x1, y1, x2, y2, durationMs, deviceSerial)
         return { ok: true, message: `已滑动 (${x1},${y1}) -> (${x2},${y2})` }
+      },
+    },
+  ]
+}
+
+function createWebTools(svc: FlutterToolServices): ToolDefinition[] {
+  const unavailable = {
+    ok: false,
+    message:
+      '未检测到可调试的 WebView。该 App 可能未开启 WebView 调试；网页的可见内容可通过 mobile_snapshot 查看无障碍树。',
+  }
+  return [
+    {
+      name: 'web_snapshot',
+      execution: 'server',
+      description:
+        '获取当前屏幕上 WebView 内的网页节点树（通过 Chrome DevTools Protocol）。当 mobile_snapshot 看到 WebView 节点、需要操作其中的网页元素时使用。返回与 mobile_snapshot 同构的节点，但 ref 独立编号。若 WebView 未开启调试会返回错误。',
+      input: z.object({}),
+      output: z.object({
+        snapshotId: z.string(),
+        packageName: z.string(),
+        screenWidth: z.number(),
+        screenHeight: z.number(),
+        nodes: z.array(nodeSchema),
+      }),
+      timeoutMs: 15_000,
+      async execute() {
+        if (!(await svc.webView.isAvailable())) return unavailable
+        return svc.webView.snapshot()
+      },
+    },
+    {
+      name: 'web_tap',
+      execution: 'server',
+      description: '点击 web_snapshot 中的指定网页节点。操作后应重新 web_snapshot 验证效果。',
+      input: z.object({
+        ref: z.number().int().describe('来自 web_snapshot 的节点 ref'),
+      }),
+      output: z.object({ ok: z.boolean(), message: z.string() }),
+      timeoutMs: 10_000,
+      async execute(raw) {
+        if (!(await svc.webView.isAvailable())) return unavailable
+        const { ref } = raw as { ref: number }
+        await svc.webView.tap(ref)
+        return { ok: true, message: '已点击网页元素' }
+      },
+    },
+    {
+      name: 'web_set_text',
+      execution: 'server',
+      description: '向 web_snapshot 中的可编辑网页节点设置文本（会先清空）。通过 CDP 输入，直接支持中文等 Unicode。',
+      input: z.object({
+        ref: z.number().int().describe('来自 web_snapshot 的节点 ref'),
+        text: z.string().describe('要设置的完整文本'),
+      }),
+      output: z.object({ ok: z.boolean(), message: z.string() }),
+      timeoutMs: 10_000,
+      async execute(raw) {
+        if (!(await svc.webView.isAvailable())) return unavailable
+        const { ref, text } = raw as { ref: number; text: string }
+        await svc.webView.setText(ref, text)
+        return { ok: true, message: `已设置文本（${text.length} 字符）` }
+      },
+    },
+    {
+      name: 'web_scroll',
+      execution: 'server',
+      description: '滚动 web_snapshot 中的指定可滚动网页节点。',
+      input: z.object({
+        ref: z.number().int(),
+        direction: z.enum(['forward', 'backward']),
+      }),
+      output: z.object({ ok: z.boolean(), message: z.string() }),
+      timeoutMs: 10_000,
+      async execute(raw) {
+        if (!(await svc.webView.isAvailable())) return unavailable
+        const { ref, direction } = raw as { ref: number; direction: 'forward' | 'backward' }
+        await svc.webView.scroll(ref, direction)
+        return { ok: true, message: `已滚动 ${direction}` }
       },
     },
   ]
@@ -557,6 +638,7 @@ export function createFlutterToolDefinitions(svc: FlutterToolServices): ToolDefi
     ...createAccessibilityTools(svc),
     ...createDeviceTools(svc),
     ...createCoordinateTools(svc),
+    ...createWebTools(svc),
     ...createFlutterTools(svc),
   ]
 }
