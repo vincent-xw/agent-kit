@@ -20,6 +20,8 @@
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput & node --watch --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "ime:setup": "bash scripts/ime-setup.sh",
+    "ime:restore": "bash scripts/ime-restore.sh",
     "bundle": "pnpm build && node build.mjs"
   },
   "dependencies": {

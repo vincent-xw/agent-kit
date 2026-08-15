@@ -12,4 +12,6 @@ coverage/
 *.sqlite-wal
 .pnpm-store/
 .pkg-cache/
+# ime-setup.sh 记录的切换前输入法，仅本地有意义
+.ime-previous
 .DS_Store
