@@ -156,6 +156,29 @@ export class AdbClient {
     return output
   }
 
+  /** 读取设备当前激活的输入法 id。设备返回 null 或空白时返回空字符串。 */
+  async getDefaultIme(deviceSerial?: string): Promise<string> {
+    const output = await this.shell('settings', ['get', 'secure', 'default_input_method'], deviceSerial)
+    const trimmed = output.trim()
+    return trimmed === 'null' ? '' : trimmed
+  }
+
+  /** 通过 ADBKeyBoard 清空当前焦点输入框。要求它是当前激活输入法。 */
+  async clearTextViaIme(deviceSerial?: string): Promise<void> {
+    await this.shell('am', ['broadcast', '-a', 'ADB_CLEAR_TEXT'], deviceSerial)
+  }
+
+  /**
+   * 通过 ADBKeyBoard 输入任意 Unicode 文本。要求它是当前激活输入法。
+   *
+   * 用 base64 而非明文广播有两个原因：上游 README 指出明文在 Oreo/P 上有
+   * UTF-8 问题；且 base64 字母表不含 shell 元字符，消除了经设备 shell 的注入面。
+   */
+  async inputTextViaIme(text: string, deviceSerial?: string): Promise<void> {
+    const encoded = Buffer.from(text, 'utf8').toString('base64')
+    await this.shell('am', ['broadcast', '-a', 'ADB_INPUT_B64', '--es', 'msg', encoded], deviceSerial)
+  }
+
   async shell(command: string, args: string[], deviceSerial?: string): Promise<string> {
     return this.execWithDevice(deviceSerial, ['shell', command, ...args], { timeoutMs: 30_000 })
   }
