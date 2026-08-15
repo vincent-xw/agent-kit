@@ -35,6 +35,8 @@
   #input:focus { outline: none; border-color: var(--accent); }
   #send { padding: 8px 20px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  #stop { padding: 8px 20px; background: transparent; color: var(--error); border: 1px solid var(--error); border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .hidden { display: none !important; }
   .typing { display: inline-flex; gap: 4px; }
   .typing span { width: 6px; height: 6px; background: var(--text2); border-radius: 50%; animation: blink 1.4s infinite; }
   .typing span:nth-child(2) { animation-delay: 0.2s; }
@@ -57,6 +59,7 @@
 <div id="input-bar">
   <textarea id="input" rows="1" placeholder="输入指令，例如：启动应用并检查首页是否正常显示..." autofocus></textarea>
   <button id="send">发送</button>
+  <button id="stop" class="hidden">停止</button>
 </div>
 
 <script>
@@ -111,6 +114,9 @@ function connectEvents() {
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
+const stopBtn = document.getElementById('stop');
+let stopRequested = false;
+stopBtn.addEventListener('click', () => { stopRequested = true; });
 const statusEl = document.getElementById('status');
 const promptEl = document.getElementById('prompt');
 
@@ -159,7 +165,9 @@ function addToolMessage(toolName, status, output) {
 async function sendMessage(text) {
   if (running) return;
   running = true;
+  stopRequested = false;
   sendBtn.disabled = true;
+  stopBtn.classList.remove('hidden');
   statusEl.textContent = '思考中...';
   addMessage('user', text);
   inputEl.value = '';
@@ -172,6 +180,7 @@ async function sendMessage(text) {
     const body = {
       input: text,
       context: { timestamp: new Date().toISOString(), platform: 'android' },
+      stepMode: true,
       ...(promptEl.value !== 'free-form' ? { promptName: promptEl.value } : {}),
     };
 
@@ -181,11 +190,24 @@ async function sendMessage(text) {
       body: JSON.stringify(body),
     }).then(r => r.json());
 
+    let stepCount = 0;
     while (result.type === 'pending_tool_calls') {
-      // Server tools execute in-process, so pending_tool_calls shouldn't occur in MVP.
-      // But handle it gracefully.
+      // flutter-dev-bff 全是 server 工具，正常不会走到这里；保留防御。
       typingEl.innerHTML = '等待工具执行...';
       break;
+    }
+    while (result.type === 'step_done') {
+      if (stopRequested) {
+        typingEl.innerHTML = '已停止';
+        break;
+      }
+      stepCount += 1;
+      statusEl.textContent = `思考中…（第 ${stepCount} 步）`;
+      result = await fetch(`${BASE}/v1/agent/sessions/${sessionId}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN}` },
+        body: JSON.stringify({ context: { timestamp: new Date().toISOString(), platform: 'android' } }),
+      }).then((r) => r.json());
     }
 
     if (result.type === 'final') {
@@ -200,7 +222,9 @@ async function sendMessage(text) {
     typingEl.textContent = `请求失败: ${err.message}`;
   } finally {
     running = false;
+    stopRequested = false;
     sendBtn.disabled = false;
+    stopBtn.classList.add('hidden');
     statusEl.textContent = '就绪';
     inputEl.focus();
   }
