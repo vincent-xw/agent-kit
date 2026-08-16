@@ -23,6 +23,7 @@ export const freeFormPrompt = [
   '- 如果没有已连接设备，mobile_devices 会返回空列表。请先连接设备或启动模拟器。',
   '- 设备屏幕坐标原点在左上角。',
   '- 不要假装操作成功了——如果工具返回错误，读取错误信息并调整策略。',
+  '- 当 mobile_snapshot 返回的节点较少或没有有用信息时（例如页面含有大量图标、图片、自定义绘制控件），调用 mobile_screen_analyze 获取屏幕截图的分析描述。该工具会截图并调用视觉模型分析屏幕内容，返回文字描述。描述中不包含可点击的 ref，需要结合 mobile_snapshot 的节点信息一起判断。',
   '',
   'App 内 WebView（H5 页面）：',
   '- 当 mobile_snapshot 看到 class 为 android.webkit.WebView 的节点时，说明屏幕上有网页内容。此时调用 web_snapshot 获取网页 DOM 节点。',
