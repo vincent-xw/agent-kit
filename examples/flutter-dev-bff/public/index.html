@@ -43,6 +43,26 @@
   .typing span:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
   .prompt-select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+  /* 设置 */
+  #settings-btn { background: transparent; color: var(--text2); border: none; cursor: pointer; font-size: 18px; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+  #settings-btn:hover { background: var(--tool-bg); color: var(--text); }
+  #settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
+  #settings-overlay.open { display: flex; }
+  #settings-panel { width: 320px; max-width: 90vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+  #settings-panel h2 { font-size: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+  #settings-panel h2 button { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .setting-row .label { font-size: 14px; }
+  .setting-row .desc { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; margin-left: 16px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider { position: absolute; inset: 0; background: var(--border); border-radius: 22px; cursor: pointer; transition: 0.2s; }
+  .switch .slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--text2); border-radius: 50%; transition: 0.2s; }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(18px); background: var(--bg); }
+  /* 精简模式下的工具卡片 */
+  .msg.tool.compact .tool-output { display: none; }
+  .msg.tool.compact { padding: 4px 10px; font-size: 12px; opacity: 0.8; }
 </style>
 </head>
 <body>
@@ -54,7 +74,23 @@
     <option value="testing">测试模式</option>
   </select>
   <span class="status" id="status">就绪</span>
+  <button id="settings-btn" title="设置">⚙</button>
 </header>
+<div id="settings-overlay">
+  <div id="settings-panel">
+    <h2>设置 <button id="settings-close">×</button></h2>
+    <div class="setting-row">
+      <div>
+        <div class="label">显示工具调用详情</div>
+        <div class="desc">关闭后只显示工具名和状态，隐藏输入输出细节</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="setting-show-tool-details">
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+</div>
 <div id="messages"></div>
 <div id="input-bar">
   <textarea id="input" rows="1" placeholder="输入指令，例如：启动应用并检查首页是否正常显示..." autofocus></textarea>
@@ -70,6 +106,35 @@ let sessionId = localStorage.getItem('flutter_session_id') || ('sess-' + Date.no
 localStorage.setItem('flutter_session_id', sessionId);
 let running = false;
 
+// ── 设置 ──
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsClose = document.getElementById('settings-close');
+const showToolDetailsEl = document.getElementById('setting-show-tool-details');
+
+// 默认关闭（精简模式），从 localStorage 读取
+let showToolDetails = localStorage.getItem('show_tool_details') === '1';
+showToolDetailsEl.checked = showToolDetails;
+applyToolDetailSetting();
+
+function applyToolDetailSetting() {
+  // 已存在的工具卡片应用设置
+  document.querySelectorAll('.msg.tool').forEach(el => {
+    el.classList.toggle('compact', !showToolDetails);
+  });
+}
+
+settingsBtn.addEventListener('click', () => settingsOverlay.classList.add('open'));
+settingsClose.addEventListener('click', () => settingsOverlay.classList.remove('open'));
+settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
+});
+showToolDetailsEl.addEventListener('change', () => {
+  showToolDetails = showToolDetailsEl.checked;
+  localStorage.setItem('show_tool_details', showToolDetails ? '1' : '0');
+  applyToolDetailSetting();
+});
+
 // 工具事件实时流。EventSource 不支持自定义请求头，token 走查询参数。
 // 断线自动重连，重连时浏览器自动带上 Last-Event-ID，服务端据此重放断开期间的事件。
 const toolEls = new Map();
@@ -80,6 +145,7 @@ function connectEvents() {
   es.addEventListener('tool_start', (e) => {
     const data = JSON.parse(e.data);
     const el = addToolMessage(data.name, '执行中…');
+    if (!showToolDetails) el.classList.add('compact');
     toolEls.set(data.name, el);
   });
 
@@ -89,7 +155,7 @@ function connectEvents() {
     const status = data.ok ? `完成 ${data.durationMs}ms` : `失败 ${data.durationMs}ms`;
     const detail = data.ok ? data.output : data.error;
     if (el) {
-      el.className = 'msg tool' + (data.ok ? '' : ' error');
+      el.className = 'msg tool' + (data.ok ? '' : ' error') + (showToolDetails ? '' : ' compact');
       el.innerHTML = `<div><span class="tool-name">${escapeHtml(data.name)}</span> <span class="tool-status">${escapeHtml(status)}</span></div>`
         + (detail ? `<div class="tool-output">${escapeHtml(String(detail).slice(0, 500))}</div>` : '');
       toolEls.delete(data.name);
@@ -150,7 +216,7 @@ function escapeHtml(s) {
 
 function addToolMessage(toolName, status, output) {
   const div = document.createElement('div');
-  div.className = 'msg tool';
+  div.className = 'msg tool' + (showToolDetails ? '' : ' compact');
   let html = `<div><span class="tool-name">${escapeHtml(toolName)}</span> <span class="tool-status">${escapeHtml(status)}</span></div>`;
   if (output) {
     const display = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
@@ -212,7 +278,12 @@ async function sendMessage(text) {
 
     if (result.type === 'final') {
       const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2);
-      typingEl.innerHTML = formatContent(output);
+      if (output && output.trim()) {
+        typingEl.innerHTML = formatContent(output);
+      } else {
+        // LLM 返回空 final：根据最后一个工具结果给出明确结束状态，避免界面停在最后一个 Action
+        typingEl.innerHTML = '<span style="color:var(--text2)">执行完成（模型未返回文字总结）。</span>';
+      }
     } else if (result.code) {
       typingEl.className = 'msg assistant error';
       typingEl.textContent = `错误: ${result.message || result.code}`;

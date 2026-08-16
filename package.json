@@ -6,8 +6,10 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev:bff": "pnpm --filter browser-extension-bff dev",
-    "start:bff": "pnpm --filter browser-extension-bff start",
+    "dev:browser": "pnpm --filter browser-extension-bff dev",
+    "dev:flutter": "pnpm --filter flutter-dev-bff dev",
+    "start:browser": "pnpm --filter browser-extension-bff start",
+    "start:flutter": "pnpm --filter flutter-dev-bff start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
