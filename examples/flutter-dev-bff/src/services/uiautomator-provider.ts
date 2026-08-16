@@ -7,6 +7,7 @@ interface RawNode {
   resourceId?: string
   className?: string
   contentDescription?: string
+  hint?: string
   packageName?: string
   clickable: boolean
   scrollable: boolean
@@ -57,6 +58,7 @@ function parseNodeAttributes(tagText: string): RawNode | null {
     ...(attrs['resource-id'] ? { resourceId: attrs['resource-id'] } : {}),
     ...(className ? { className } : {}),
     ...(attrs['content-desc'] ? { contentDescription: attrs['content-desc'] } : {}),
+    ...(attrs.hint ? { hint: attrs.hint } : {}),
     ...(attrs.package ? { packageName: attrs.package } : {}),
     clickable: parseBool(attrs.clickable),
     scrollable: parseBool(attrs.scrollable),
@@ -126,6 +128,7 @@ export class UiAutomatorDumpProvider implements SnapshotProvider {
         focused: raw.focused,
         ...(raw.text ? { text: raw.text } : {}),
         ...(raw.contentDescription ? { contentDescription: raw.contentDescription } : {}),
+        ...(raw.hint ? { hint: raw.hint } : {}),
         ...(raw.className ? { className: raw.className } : {}),
         ...(raw.resourceId ? { resourceId: raw.resourceId } : {}),
         ...(raw.checkable ? { checked: raw.checked } : {}),

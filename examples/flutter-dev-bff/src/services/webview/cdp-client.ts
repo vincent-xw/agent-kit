@@ -38,6 +38,7 @@ const SCAN_JS = `(() => {
         text: (el.innerText || el.textContent || '').trim().slice(0, 200),
         id: el.id || undefined,
         ariaLabel: el.getAttribute('aria-label') || el.getAttribute('alt') || undefined,
+        placeholder: el.getAttribute('placeholder') || undefined,
         selector: el.id ? '#' + CSS.escape(el.id) : cssPath(el),
         rect: { x: r.left, y: r.top, width: r.width, height: r.height },
         clickable: isInteractive(el),

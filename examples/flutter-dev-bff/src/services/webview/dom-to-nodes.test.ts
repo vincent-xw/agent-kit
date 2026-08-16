@@ -58,4 +58,20 @@ describe('domToNodes', () => {
     )
     expect(nodes[0]!.enabled).toBe(false)
   })
+
+  it('placeholder 映射为 hint', () => {
+    const { nodes } = domToNodes(
+      [el({ tag: 'input', placeholder: '请输入用户名' })],
+      { devicePixelRatio: 1 },
+    )
+    expect(nodes[0]!.hint).toBe('请输入用户名')
+  })
+
+  it('无 placeholder 时用 ariaLabel 作为 hint 回退', () => {
+    const { nodes } = domToNodes(
+      [el({ tag: 'input', ariaLabel: '用户名' })],
+      { devicePixelRatio: 1 },
+    )
+    expect(nodes[0]!.hint).toBe('用户名')
+  })
 })

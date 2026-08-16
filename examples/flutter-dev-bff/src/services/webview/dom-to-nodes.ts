@@ -4,6 +4,7 @@ export interface DomElement {
   text?: string
   id?: string
   ariaLabel?: string
+  placeholder?: string
   tag: string
   rect: { x: number; y: number; width: number; height: number }
   clickable: boolean
@@ -37,6 +38,9 @@ export function domToNodes(
     if (e.text) node.text = e.text
     if (e.id) node.resourceId = e.id
     if (e.ariaLabel) node.contentDescription = e.ariaLabel
+    // placeholder 作为 hint，帮助 Agent 识别空输入框的用途
+    if (e.placeholder) node.hint = e.placeholder
+    else if (e.ariaLabel) node.hint = e.ariaLabel
     return node
   })
   return { nodes }

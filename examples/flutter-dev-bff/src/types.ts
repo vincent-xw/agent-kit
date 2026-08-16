@@ -10,6 +10,7 @@ export interface DeviceNode {
   nodeId: string
   text?: string
   contentDescription?: string
+  hint?: string
   className?: string
   resourceId?: string
   bounds: { left: number; top: number; right: number; bottom: number }
