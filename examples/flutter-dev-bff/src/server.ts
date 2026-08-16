@@ -26,10 +26,11 @@ import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
 import {
   createConsoleAuditLogger,
+  createLlmClient,
   createLlmVerboseLogger,
   createPromptRegistry,
 } from '@agent-kit/core'
-import type { AuditLogger, LlmSecret, LlmTraceEvent } from '@agent-kit/core'
+import type { AuditLogger, LlmClient, LlmSecret, LlmTraceEvent } from '@agent-kit/core'
 
 import { createFlutterToolDefinitions } from './flutter-tools.js'
 import { debuggingPrompt, freeFormPrompt, testingPrompt } from './prompts.js'
@@ -40,6 +41,8 @@ import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
 import { createEventBus } from './services/event-bus.js'
 import { CdpClient } from './services/webview/cdp-client.js'
+import { SkillStore } from './services/skill-store.js'
+import { generateSkill } from './services/skill-generator.js'
 import type { FlutterEvent } from './services/event-bus.js'
 import { instrumentTools, llmTraceToBus } from './tool-events.js'
 
@@ -58,6 +61,7 @@ export function createFlutterDevBff(options: {
   const audit = options.audit ?? createConsoleAuditLogger({ prefix: '[flutter-bff]' })
   const programDir = getProgramDir()
   const screenshotDir = options.screenshotDir ?? join(programDir, 'screenshots')
+  const skillsDir = join(programDir, 'skills')
   // dev 模式下 public/ 在源码根目录（dist 的上一级）；pkg 打包后在 exe 同目录
   const publicDir = existsSync(join(programDir, 'public'))
     ? join(programDir, 'public')
@@ -68,6 +72,7 @@ export function createFlutterDevBff(options: {
   const webView = new CdpClient(adb)
   const flutter = new FlutterProcessManager({ projectPath: options.flutterProjectPath })
   const screenshots = new ScreenshotStore(screenshotDir)
+  const skillStore = new SkillStore(skillsDir)
 
   let vmClient: VmServiceClient | null = null
 
@@ -118,6 +123,17 @@ export function createFlutterDevBff(options: {
   })
   for (const tool of instrumentTools(toolDefinitions, bus)) runtime.tools.register(tool)
 
+  // Skill 生成用的 LLM 客户端：每次调用前从 secrets 读取最新密钥。
+  const skillLlm: LlmClient = {
+    complete: async (request) => {
+      const secret = (await runtime.secrets.get()) as LlmSecret
+      return createLlmClient({
+        ...secret,
+        ...(options.llmMaxRetries !== undefined ? { maxRetries: options.llmMaxRetries } : {}),
+      }).complete(request)
+    },
+  }
+
   const app = createAgentBff({
     authenticate: async (request) => {
       const token = request.headers.get('authorization')?.replace(/^Bearer\s+/, '')
@@ -142,6 +158,53 @@ export function createFlutterDevBff(options: {
       .get(scopedId) as { messages?: string } | undefined
     if (!row?.messages) return c.json({ messages: [] })
     return c.json({ messages: JSON.parse(row.messages) })
+  })
+
+  // ── Skills ──────────────────────────────────────────────
+  app.get('/api/skills', (c) => {
+    return c.json({ skills: skillStore.list() })
+  })
+
+  app.get('/api/skills/:slug', (c) => {
+    const skill = skillStore.get(c.req.param('slug'))
+    if (!skill) return c.json({ error: 'not found' }, 404)
+    return c.json(skill)
+  })
+
+  app.post('/api/skills/generate', async (c) => {
+    const body = await c.req.json().catch(() => ({}))
+    const intent = typeof body?.intent === 'string' ? body.intent.trim() : ''
+    if (!intent) return c.json({ error: 'intent is required' }, 400)
+    try {
+      const generated = await generateSkill(skillLlm, toolDefinitions, intent)
+      return c.json(generated)
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/skills/:slug', async (c) => {
+    const slug = c.req.param('slug')
+    const body = await c.req.json().catch(() => ({}))
+    if (!body?.name || !body?.prompt) return c.json({ error: 'name and prompt required' }, 400)
+    const now = new Date().toISOString()
+    const existing = skillStore.get(slug)
+    const meta = {
+      name: body.name,
+      description: body.description ?? '',
+      icon: body.icon,
+      version: existing?.meta.version ?? '1.0.0',
+      tools: body.tools,
+      createdAt: existing?.meta.createdAt ?? now,
+      updatedAt: now,
+    }
+    skillStore.save(slug, meta, body.prompt)
+    return c.json({ slug, meta })
+  })
+
+  app.delete('/api/skills/:slug', (c) => {
+    skillStore.delete(c.req.param('slug'))
+    return c.json({ ok: true })
   })
 
   app.get('/api/screenshots/:id', (c) => {
