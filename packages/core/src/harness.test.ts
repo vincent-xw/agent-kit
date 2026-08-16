@@ -171,16 +171,33 @@ describe('AgentHarness', () => {
     await expect(harness.resume({ sessionId: 's-other', callId: 'call-8', output: { title: 'x' } })).rejects.toMatchObject({ code: 'PENDING_CALL_NOT_FOUND' })
   })
 
-  it('resume 的工具输出不符合 Schema 返回 TOOL_OUTPUT_INVALID', async () => {
+  it('resume 的工具输出不符合 Schema 时降级为工具错误，不硬崩会话', async () => {
     const tools = createToolRegistry()
     tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })
+    const historyFromLlm: SessionMessage[][] = []
     const harness = createAgentHarness({
-      llm: { complete: async () => callsOf({ callId: 'call-9', toolName: 'browser_read_page', input: {} }) },
+      llm: {
+        complete: async (request) => {
+          historyFromLlm.push(request.messages as SessionMessage[])
+          return historyFromLlm.length === 1
+            ? callsOf({ callId: 'call-9', toolName: 'browser_read_page', input: {} })
+            : { type: 'final', output: '工具返回了错误' }
+        },
+      },
       sessions: createMemorySessionStore(), tools, maxSteps: 3,
     })
 
     await harness.run({ sessionId: 's-9', input: '读取页面', context: {} })
-    await expect(harness.resume({ sessionId: 's-9', callId: 'call-9', output: { title: 123 } })).rejects.toMatchObject({ code: 'TOOL_OUTPUT_INVALID' })
+    // 回填不符合 schema 的 output（title 应为 string，这里给了 number）。
+    // 不应抛错，而是把校验失败作为工具错误喂回模型，让模型自行恢复。
+    await expect(harness.resume({ sessionId: 's-9', callId: 'call-9', output: { title: 123 } })).resolves.toEqual({
+      type: 'final', output: '工具返回了错误',
+    })
+    // 第二次发给模型的历史里应包含 ok:false 的工具错误结果。
+    const secondCallMessages = historyFromLlm[1]
+    const toolMsg = secondCallMessages.find((m) => m.role === 'tool' && (m as { callId?: string }).callId === 'call-9')
+    expect(toolMsg).toBeDefined()
+    expect((toolMsg as { content: { ok: boolean; code: string } }).content).toMatchObject({ ok: false, code: 'TOOL_OUTPUT_INVALID' })
   })
 
   it('把已注册工具的 JSON Schema 发给模型', async () => {

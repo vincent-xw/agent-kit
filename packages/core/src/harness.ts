@@ -343,7 +343,20 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       }
       const tool = deps.tools.get(pending.toolName)
       if (!tool) throw new AgentKitError('TOOL_NOT_REGISTERED', `工具未注册：${pending.toolName}`)
-      const parsedOutput = parseWithCode(tool.output, request.output, 'TOOL_OUTPUT_INVALID')
+
+      // 远端回填的 output 可能不符合 schema（扩展侧 bug、版本不同步等）。
+      // 不能让一次校验失败硬崩整个会话 —— 把校验失败作为工具错误结果喂回模型，
+      // 与本地工具执行失败的处理保持一致。
+      let parsedOutput: unknown
+      try {
+        parsedOutput = parseWithCode(tool.output, request.output, 'TOOL_OUTPUT_INVALID')
+      } catch (error) {
+        const code = error instanceof AgentKitError ? error.code : 'TOOL_OUTPUT_INVALID'
+        const message = error instanceof Error ? error.message : '工具输出校验失败'
+        await deps.audit?.log({ requestId: request.callId, durationMs: 0, toolName: pending.toolName, errorCode: code })
+        parsedOutput = { ok: false, code, message }
+      }
+
       await pendingCalls.delete(request.callId)
       const history: SessionMessage[] = [
         ...(await deps.sessions.load(request.sessionId)),

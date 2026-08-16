@@ -6,6 +6,15 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "flutter-dev-bff", "start"],
       "port": 8788
+    },
+    {
+      "name": "flutter-playground-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/xuewen/ai-lab/project/learn-agent-flutter/build/web && python3 -m http.server 8080"
+      ],
+      "port": 8080
     }
   ]
 }

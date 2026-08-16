@@ -10,13 +10,9 @@ import type { ToolDefinition } from '@agent-kit/core'
  * 这条契约必须写进 description，否则模型无从知晓，而错误的后果是「点了但点错且不报错」。
  */
 
-/** 元素定位意图。三种方式任选：ref（推荐）、显式选择器、预设角色。 */
+/** 元素定位意图。两种方式任选：ref（推荐）或显式选择器。 */
 const locatorSchema = z.object({
   ref: z.number().int().optional().describe('来自 browser_snapshot 的元素引用。自由操作时优先用这个'),
-  role: z
-    .enum(['candidateListItem', 'candidateName', 'resumeContainer', 'favoriteButton', 'greetButton', 'messageInput', 'sendButton', 'dialog'])
-    .optional()
-    .describe('预设元素角色，仅用于 BOSS 直聘的既有流程'),
   selector: z.string().optional().describe('显式 CSS 选择器'),
   index: z.number().int().optional().describe('同一条件匹配到多个元素时的序号，从 0 开始'),
 })
@@ -238,9 +234,10 @@ export const browserToolDefinitions: ToolDefinition[] = [
     // 有意不返回 base64：一张截图约 4 万 token，会挤爆上下文导致模型输出退化。
     // 图片数据留在扩展侧供 UI 展示，模型只需知道截图已生成。
     output: z.object({
-      screenshotId: z.string().describe('截图标识，供用户在对话区域查看'),
+      screenshotId: z.string().optional().describe('截图标识，供用户在对话区域查看；未持久化时省略'),
       width: z.number(),
       height: z.number(),
+      persisted: z.boolean().optional().describe('是否已保存到附件；false 表示模型看不到截图'),
       message: z.string(),
     }),
   },
