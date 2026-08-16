@@ -8,6 +8,7 @@ import type { FlutterProcessManager } from './services/flutter-process-manager.j
 import type { VmServiceClient } from './services/vm-service-client.js'
 import type { ScreenshotStore } from './services/screenshot-store.js'
 import type { CdpClient } from './services/webview/cdp-client.js'
+import type { VisionClient } from './services/vision-client.js'
 import type { AndroidKey } from './types.js'
 
 const execFileAsync = promisify(execFile)
@@ -24,6 +25,8 @@ export interface FlutterToolServices {
   screenshots: ScreenshotStore
   projectPath: string
   webView: CdpClient
+  /** 视觉模型客户端，用于截图分析。未配置时此字段为 undefined。 */
+  vision?: VisionClient
 }
 
 function createDeviceTools(svc: FlutterToolServices): ToolDefinition[] {
@@ -123,6 +126,31 @@ function createDeviceTools(svc: FlutterToolServices): ToolDefinition[] {
           height: info.height,
           message: '截图已保存，用户可以在对话中查看',
         }
+      },
+    },
+    {
+      name: 'mobile_screen_analyze',
+      execution: 'server',
+      description:
+        '截图并调用视觉模型分析屏幕内容，返回文字描述。当 mobile_snapshot 返回的节点较少或没有有用信息时使用（例如页面含有大量图标、图片、自定义绘制控件）。描述中不包含可点击的 ref，需要结合 mobile_snapshot 的节点信息一起判断。',
+      input: z.object({
+        deviceSerial: z.string().optional(),
+      }),
+      output: z.object({
+        ok: z.boolean(),
+        description: z.string().optional(),
+        message: z.string(),
+      }),
+      timeoutMs: 30_000,
+      async execute(raw) {
+        if (!svc.vision) {
+          return { ok: false, message: '未配置视觉模型。请设置 VISION_API_KEY、VISION_MODEL 和 VISION_BASE_URL 环境变量。' }
+        }
+        const { deviceSerial } = raw as { deviceSerial?: string }
+        const buffer = await svc.adb.screenshot(deviceSerial)
+        const base64 = buffer.toString('base64')
+        const description = await svc.vision.analyze(base64)
+        return { ok: true, description, message: '截图已分析' }
       },
     },
   ]

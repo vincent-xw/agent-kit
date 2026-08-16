@@ -41,6 +41,8 @@ import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
 import { createEventBus } from './services/event-bus.js'
 import { CdpClient } from './services/webview/cdp-client.js'
+import { VisionClient } from './services/vision-client.js'
+import type { VisionClientConfig } from './services/vision-client.js'
 import { SkillStore } from './services/skill-store.js'
 import { generateSkill } from './services/skill-generator.js'
 import type { FlutterEvent } from './services/event-bus.js'
@@ -56,6 +58,7 @@ export function createFlutterDevBff(options: {
   audit?: AuditLogger
   llmTrace?: (event: LlmTraceEvent) => void
   llmMaxRetries?: number
+  vision?: VisionClientConfig
 }) {
   const database = new DatabaseSync(options.databasePath ?? 'flutter-dev-bff.sqlite')
   const audit = options.audit ?? createConsoleAuditLogger({ prefix: '[flutter-bff]' })
@@ -96,6 +99,7 @@ export function createFlutterDevBff(options: {
     screenshots,
     projectPath: options.flutterProjectPath,
     webView,
+    ...(options.vision ? { vision: new VisionClient(options.vision) } : {}),
   })
 
   const bus = createEventBus()
@@ -373,6 +377,12 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
   const port = Number(process.env.PORT ?? '8788')
   const dbPath = join(getProgramDir(), 'flutter-dev-bff.sqlite')
 
+  const vision =
+    process.env.VISION_API_KEY && process.env.VISION_MODEL && process.env.VISION_BASE_URL
+      ? { apiKey: process.env.VISION_API_KEY, baseUrl: process.env.VISION_BASE_URL, model: process.env.VISION_MODEL }
+      : undefined
+  if (vision) console.log(`[flutter-bff] 视觉模型已配置: ${vision.model}`)
+
   const bff = createFlutterDevBff({
     masterKey,
     apiToken,
@@ -381,6 +391,7 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
     llm: { apiKey, baseUrl, model },
     ...(llmTrace ? { llmTrace } : {}),
     llmMaxRetries,
+    ...(vision ? { vision } : {}),
   })
 
   await bff.ready
