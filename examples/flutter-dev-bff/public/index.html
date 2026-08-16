@@ -63,6 +63,44 @@
   /* 精简模式下的工具卡片 */
   .msg.tool.compact .tool-output { display: none; }
   .msg.tool.compact { padding: 4px 10px; font-size: 12px; opacity: 0.8; }
+  /* Skills 面板 */
+  #skills-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  #skills-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #skills-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
+  #skills-overlay.open { display: flex; }
+  #skills-panel { width: 420px; max-width: 92vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  #skills-panel h2 { font-size: 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  #skills-panel h2 button { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+  .skill-card { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; cursor: pointer; transition: border-color 0.15s; }
+  .skill-card:hover { border-color: var(--accent); }
+  .skill-card .skill-name { font-weight: 600; color: var(--text); font-size: 14px; }
+  .skill-card .skill-desc { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .skill-card .skill-meta { font-size: 11px; color: var(--text2); margin-top: 6px; display: flex; gap: 8px; align-items: center; }
+  .skill-card .skill-meta .run-count { background: var(--surface2); padding: 1px 6px; border-radius: 10px; }
+  .skill-card .skill-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .skill-card .skill-actions button { font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+  .btn-primary { background: var(--accent); color: var(--bg); border: none; font-weight: 600; }
+  .btn-secondary { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+  .btn-danger { background: transparent; color: var(--error); border: 1px solid var(--error); }
+  /* Skill 生成/编辑表单 */
+  #skill-form { display: flex; flex-direction: column; gap: 10px; }
+  #skill-form label { font-size: 12px; color: var(--text2); }
+  #skill-form input, #skill-form textarea { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
+  #skill-form textarea { min-height: 180px; resize: vertical; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.5; }
+  #skill-form .form-actions { display: flex; gap: 8px; margin-top: 4px; }
+  #skill-form .form-actions button { flex: 1; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #intent-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text); font-size: 14px; width: 100%; resize: vertical; min-height: 60px; font-family: inherit; }
+  .empty-state { text-align: center; color: var(--text2); font-size: 13px; padding: 40px 20px; line-height: 1.8; }
+  .generating { color: var(--accent); font-size: 12px; text-align: center; padding: 12px; }
+  .skill-detail { display: flex; flex-direction: column; gap: 10px; }
+  .skill-detail .back { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0; text-align: left; }
+  .skill-detail pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 11px; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .runs-list { font-size: 12px; }
+  .run-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 6px; }
+  .run-item .run-status { font-weight: 600; }
+  .run-item .run-status.completed { color: var(--accent2); }
+  .run-item .run-status.failed { color: var(--error); }
+  .run-item .run-time { color: var(--text2); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -74,9 +112,19 @@
     <option value="testing">测试模式</option>
   </select>
   <span class="status" id="status">就绪</span>
+  <button id="skills-btn" title="Skills">Skills</button>
   <button id="settings-btn" title="设置">⚙</button>
 </header>
-<div id="settings-overlay">
+
+<!-- Skills 面板 -->
+<div id="skills-overlay">
+  <div id="skills-panel">
+    <h2>Skills <button id="skills-close">×</button></h2>
+    <div id="skills-content"></div>
+  </div>
+</div>
+
+<!-- 设置面板 -->
   <div id="settings-panel">
     <h2>设置 <button id="settings-close">×</button></h2>
     <div class="setting-row">
@@ -134,6 +182,194 @@ showToolDetailsEl.addEventListener('change', () => {
   localStorage.setItem('show_tool_details', showToolDetails ? '1' : '0');
   applyToolDetailSetting();
 });
+
+// ── Skills ──
+const skillsOverlay = document.getElementById('skills-overlay');
+const skillsBtn = document.getElementById('skills-btn');
+const skillsClose = document.getElementById('skills-close');
+const skillsContent = document.getElementById('skills-content');
+let currentSkillSlug = null;
+
+skillsBtn.addEventListener('click', () => { skillsOverlay.classList.add('open'); renderSkillList(); });
+skillsClose.addEventListener('click', () => { skillsOverlay.classList.remove('open'); currentSkillSlug = null; });
+skillsOverlay.addEventListener('click', (e) => {
+  if (e.target === skillsOverlay) { skillsOverlay.classList.remove('open'); currentSkillSlug = null; }
+});
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+  return res.json();
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// 列表视图
+async function renderSkillList() {
+  skillsContent.innerHTML = '<div class="generating">加载中…</div>';
+  let skills = [];
+  try {
+    const data = await api('/api/skills');
+    skills = data.skills || [];
+  } catch (e) {
+    skillsContent.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  let html = `
+    <button class="btn-primary" id="new-skill-btn" style="padding:10px;border:none;border-radius:6px;cursor:pointer;font-size:13px;">+ 用大白话新建 Skill</button>
+    <div style="height:8px"></div>`;
+  if (skills.length === 0) {
+    html += `<div class="empty-state">还没有 Skill。<br>点上面的按钮，用大白话描述你想做的事，LLM 会帮你生成。</div>`;
+  } else {
+    for (const s of skills) {
+      const runCount = s.meta.tools ? '' : '';
+      html += `<div class="skill-card" data-slug="${escapeHtml(s.slug)}">
+        <div class="skill-name">${escapeHtml(s.meta.name)}</div>
+        <div class="skill-desc">${escapeHtml(s.meta.description || '无描述')}</div>
+        <div class="skill-meta">
+          <span>v${escapeHtml(s.meta.version)}</span>
+          <span>${escapeHtml((s.meta.updatedAt || '').slice(0, 10))}</span>
+        </div>
+      </div>`;
+    }
+  }
+  skillsContent.innerHTML = html;
+  document.getElementById('new-skill-btn')?.addEventListener('click', renderNewSkillForm);
+  skillsContent.querySelectorAll('.skill-card').forEach(card => {
+    card.addEventListener('click', () => renderSkillDetail(card.dataset.slug));
+  });
+}
+
+// 新建表单：输入大白话 → 调 LLM 生成
+function renderNewSkillForm() {
+  skillsContent.innerHTML = `
+    <button class="back" id="back-to-list">← 返回列表</button>
+    <h3 style="font-size:14px;margin:4px 0">用大白话描述你想做什么</h3>
+    <textarea id="intent-input" placeholder="例如：打开真实场景 Demo，用账号 13800138000 密码 test123 登录，验证码填 123456，进入第一个订单，打开帮助中心，在 H5 页面用 e2e_user / pass1234 登录"></textarea>
+    <div class="form-actions">
+      <button class="btn-primary" id="generate-btn" style="padding:10px;border:none;border-radius:6px;cursor:pointer;">生成 Skill</button>
+    </div>
+    <div id="generate-status"></div>`;
+  document.getElementById('back-to-list').addEventListener('click', renderSkillList);
+  document.getElementById('generate-btn').addEventListener('click', async () => {
+    const intent = document.getElementById('intent-input').value.trim();
+    if (!intent) return;
+    const statusEl = document.getElementById('generate-status');
+    statusEl.innerHTML = '<div class="generating">LLM 正在生成，请稍候…</div>';
+    document.getElementById('generate-btn').disabled = true;
+    try {
+      const generated = await api('/api/skills/generate', { method: 'POST', body: JSON.stringify({ intent }) });
+      renderSkillEdit(generated, true);
+    } catch (e) {
+      statusEl.innerHTML = `<div style="color:var(--error);font-size:12px;">生成失败：${escapeHtml(e.message)}</div>`;
+      document.getElementById('generate-btn').disabled = false;
+    }
+  });
+}
+
+// 核验/编辑表单
+function renderSkillEdit(skill, isNew) {
+  skillsContent.innerHTML = `
+    <button class="back" id="back-to-list">← 返回列表</button>
+    <h3 style="font-size:14px;margin:4px 0">${isNew ? '核验并保存 Skill' : '编辑 Skill'}</h3>
+    <form id="skill-form">
+      <label>名称（英文 kebab-case，用于目录名）</label>
+      <input name="name" value="${escapeHtml(skill.slug)}" />
+      <label>描述</label>
+      <input name="description" value="${escapeHtml(skill.meta.description || '')}" />
+      <label>系统提示词（可编辑）</label>
+      <textarea name="prompt">${escapeHtml(skill.prompt)}</textarea>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="cancel-skill" style="padding:8px;border-radius:6px;cursor:pointer;">取消</button>
+        <button type="submit" class="btn-primary" style="padding:8px;border:none;border-radius:6px;cursor:pointer;">${isNew ? '保存 Skill' : '更新'}</button>
+      </div>
+    </form>`;
+  document.getElementById('back-to-list').addEventListener('click', renderSkillList);
+  document.getElementById('cancel-skill').addEventListener('click', renderSkillList);
+  document.getElementById('skill-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      name: fd.get('name'),
+      description: fd.get('description'),
+      prompt: fd.get('prompt'),
+    };
+    const slug = fd.get('name');
+    try {
+      await api(`/api/skills/${encodeURIComponent(slug)}`, { method: 'POST', body: JSON.stringify(payload) });
+      renderSkillList();
+    } catch (err) {
+      alert('保存失败：' + err.message);
+    }
+  });
+}
+
+// 详情：查看 prompt + 执行历史 + 一键运行
+async function renderSkillDetail(slug) {
+  currentSkillSlug = slug;
+  skillsContent.innerHTML = '<div class="generating">加载中…</div>';
+  let skill;
+  try {
+    skill = await api(`/api/skills/${encodeURIComponent(slug)}`);
+  } catch (e) {
+    skillsContent.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  const runsHtml = (skill.runs || []).length === 0
+    ? '<div style="color:var(--text2);font-size:12px;">暂无执行记录</div>'
+    : `<div class="runs-list">${skill.runs.map(r => `
+        <div class="run-item">
+          <div class="run-status ${r.status}">${r.status === 'completed' ? '✓ 成功' : r.status === 'failed' ? '✗ 失败' : r.status}</div>
+          <div class="run-time">${escapeHtml((r.finishedAt || r.startedAt || '').replace('T', ' ').slice(0, 19))}</div>
+          ${r.summary ? `<div style="font-size:12px;margin-top:4px;">${escapeHtml(r.summary)}</div>` : ''}
+        </div>`).join('')}</div>`;
+  skillsContent.innerHTML = `
+    <button class="back" id="back-to-list">← 返回列表</button>
+    <div class="skill-detail">
+      <h3 style="font-size:15px;">${escapeHtml(skill.meta.name)}</h3>
+      <div style="color:var(--text2);font-size:12px;">${escapeHtml(skill.meta.description || '')}</div>
+      <div style="color:var(--text2);font-size:11px;">v${escapeHtml(skill.meta.version)} · ${escapeHtml((skill.meta.tools || []).join(', '))}</div>
+      <button class="btn-primary" id="run-skill-btn" style="padding:10px;border:none;border-radius:6px;cursor:pointer;font-weight:600;">▶ 一键执行</button>
+      <div>
+        <strong style="font-size:12px;">系统提示词</strong>
+        <pre>${escapeHtml(skill.prompt)}</pre>
+      </div>
+      <div>
+        <strong style="font-size:12px;">执行历史</strong>
+        ${runsHtml}
+      </div>
+      <button class="btn-danger" id="delete-skill-btn" style="padding:6px;border-radius:6px;cursor:pointer;margin-top:8px;align-self:flex-start;">删除 Skill</button>
+    </div>`;
+  document.getElementById('back-to-list').addEventListener('click', renderSkillList);
+  document.getElementById('run-skill-btn').addEventListener('click', () => runSkill(slug, skill.meta.name));
+  document.getElementById('delete-skill-btn').addEventListener('click', async () => {
+    if (!confirm(`确定删除 Skill「${skill.meta.name}」？`)) return;
+    await api(`/api/skills/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+    renderSkillList();
+  });
+}
+
+// 执行 skill：关掉面板，切换到该 skill 的 prompt，发送一条启动消息
+async function runSkill(slug, name) {
+  skillsOverlay.classList.remove('open');
+  // 把模式选择器切到 skill-<slug>（后端已注册为 promptName）
+  const skillPromptName = 'skill-' + slug;
+  // 如果下拉里还没有这个选项，动态加上
+  if (!Array.from(promptEl.options).some(o => o.value === skillPromptName)) {
+    const opt = document.createElement('option');
+    opt.value = skillPromptName;
+    opt.textContent = 'Skill: ' + name;
+    promptEl.appendChild(opt);
+  }
+  promptEl.value = skillPromptName;
+  inputEl.value = '开始执行';
+  sendMessage('开始执行');
+}
 
 // 工具事件实时流。EventSource 不支持自定义请求头，token 走查询参数。
 // 断线自动重连，重连时浏览器自动带上 Last-Event-ID，服务端据此重放断开期间的事件。

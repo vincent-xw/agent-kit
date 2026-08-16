@@ -105,6 +105,12 @@ export function createFlutterDevBff(options: {
   prompts.register({ name: 'debugging', version: '1', prompt: debuggingPrompt })
   prompts.register({ name: 'testing', version: '1', prompt: testingPrompt })
 
+  // 启动时把磁盘上已有的 skills 注册为可选系统提示词（skill-<slug>）
+  for (const s of skillStore.list()) {
+    const skill = skillStore.get(s.slug)
+    if (skill) prompts.register({ name: `skill-${s.slug}`, version: skill.meta.version, prompt: skill.prompt })
+  }
+
   const runtime = createSqliteAgentRuntime({
     database,
     masterKey: options.masterKey,
@@ -199,6 +205,8 @@ export function createFlutterDevBff(options: {
       updatedAt: now,
     }
     skillStore.save(slug, meta, body.prompt)
+    // 把 skill 的 prompt 注册为可选用的系统提示词，运行时用 promptName=skill-<slug>
+    prompts.register({ name: `skill-${slug}`, version: meta.version, prompt: body.prompt })
     return c.json({ slug, meta })
   })
 
