@@ -1,16 +1,11 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, createReadStream } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
+import { z } from 'zod'
 
-/**
- * 获取程序所在目录（配置文件与数据库的落地位置）。
- *
- * pkg 打包后代码跑在只读虚拟 FS 里（POSIX 是 /snapshot/...，Windows 是 C:\snapshot\...），
- * 所以不能用 __filename 的目录，必须用 exe 自身所在目录。
- */
 function getProgramDir(): string {
   if ((process as { pkg?: unknown }).pkg !== undefined) {
     return dirname(process.execPath)
@@ -22,16 +17,14 @@ function getProgramDir(): string {
     if (typeof import.meta !== 'undefined' && import.meta.url) {
       return dirname(fileURLToPath(import.meta.url))
     }
-  } catch {
-    // import.meta 不可用时 fallback
-  }
+  } catch { /* fallback */ }
   return dirname(process.execPath)
 }
 
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
 import { createConsoleAuditLogger, createContextManager, createLlmVerboseLogger, createPromptRegistry } from '@agent-kit/core'
-import type { AuditLogger, LlmSecret, LlmTraceEvent } from '@agent-kit/core'
+import type { AuditLogger, LlmSecret, LlmTraceEvent, ToolDefinition } from '@agent-kit/core'
 import { WebSocketServer } from 'ws'
 
 import {
@@ -44,42 +37,101 @@ import {
   planningProtocol,
 } from './browser-tools.js'
 import { createEventBus } from './event-bus.js'
-import type { EventBus } from './event-bus.js'
 import { createWsExecutor } from './ws-executor.js'
-import type { WsExecutor } from './ws-executor.js'
+import { createFileStorage } from './file-storage.js'
+import { createSkillStore } from './skill-store.js'
+import { createSessionStore } from './session-store.js'
 
-/** 装配浏览器扩展专属 BFF：SQLite 密钥库 + Bearer 鉴权 + harness HTTP 边界。 */
+/** 构造文件操作的 server 端工具。 */
+function createFileTools(fileStorage: ReturnType<typeof createFileStorage>): ToolDefinition[] {
+  return [
+    {
+      name: 'browser_save_file',
+      execution: 'server',
+      description: '生成文件供用户下载。当任务需要把收集到的数据导出时调用此工具。支持 txt/csv/xlsx/json。xlsx 的 content 传 base64 编码的二进制。',
+      input: z.object({
+        filename: z.string(),
+        format: z.enum(['txt', 'csv', 'xlsx', 'json']),
+        content: z.string(),
+      }),
+      output: z.object({
+        ok: z.boolean(),
+        message: z.string(),
+        fileId: z.string().optional(),
+        filename: z.string().optional(),
+      }),
+      execute: async (input: unknown) => {
+        const { filename, format, content } = input as { filename: string; format: 'txt' | 'csv' | 'xlsx' | 'json'; content: string }
+        const file = fileStorage.saveGeneratedFile(filename, format, content)
+        return { ok: true, message: `文件已生成：${file.filename}`, fileId: file.id, filename: file.filename }
+      },
+    },
+    {
+      name: 'browser_read_file',
+      execution: 'server',
+      description: '从 BFF 文件存储读取文本文件。用户上传的文件和之前会话写入的文件跨会话可用。大文件自动截断前 50000 字符。',
+      input: z.object({
+        name: z.string(),
+      }),
+      output: z.object({
+        ok: z.boolean(),
+        name: z.string().optional(),
+        content: z.string().optional(),
+        size: z.number().optional(),
+        truncated: z.boolean().optional(),
+        totalLength: z.number().optional(),
+        message: z.string(),
+      }),
+      execute: async (input: unknown) => {
+        const { name } = input as { name: string }
+        return fileStorage.readFile(name)
+      },
+    },
+    {
+      name: 'browser_write_file',
+      execution: 'server',
+      description: '将文本内容写入 BFF 文件存储，跨会话可用。适合保存中间结果。只支持文本格式。',
+      input: z.object({
+        name: z.string(),
+        content: z.string(),
+      }),
+      output: z.object({
+        ok: z.boolean(),
+        name: z.string().optional(),
+        size: z.number().optional(),
+        message: z.string(),
+      }),
+      execute: async (input: unknown) => {
+        const { name, content } = input as { name: string; content: string }
+        const file = fileStorage.saveTextFile(name, content)
+        return { ok: true, name: file.filename, size: file.size, message: `已保存：${file.filename}` }
+      },
+    },
+  ]
+}
+
 export function createBrowserExtensionBff(options: {
   masterKey: string
   apiToken: string
   databasePath?: string
-  /** 模型配置。由 BFF 进程环境提供，扩展侧永远看不到这三个字段。 */
   llm?: LlmSecret
-  /** 审计日志。省略时使用控制台实现。传 undefined 之外的值可替换或静音。 */
   audit?: AuditLogger
-  /** LLM 调用级追踪。开启 verbose 时注入，打印完整输入输出供排障。 */
   llmTrace?: (event: LlmTraceEvent) => void
   llmMaxRetries?: number
 }) {
-  // 主密钥只存在于 BFF 进程环境，绝不写入 SQLite，也绝不暴露给浏览器扩展。
-  const database = new DatabaseSync(options.databasePath ?? 'agent-kit.sqlite')
+  const database = new DatabaseSync(options.databasePath ?? join(getProgramDir(), 'agent-kit.sqlite'))
   const audit = options.audit ?? createConsoleAuditLogger({ prefix: '[bff]' })
   const prompts = createPromptRegistry()
   prompts.register({ name: 'free-form', version: '1', prompt: freeFormPrompt })
   prompts.register({ name: 'planning', version: '1', prompt: planningPrompt, protocol: planningProtocol })
   prompts.register({ name: 'browser-automation', version: '1', prompt: browserAutomationPrompt })
-  prompts.register({
-    name: 'candidate-assessment',
-    version: '1',
-    prompt: candidateAssessmentPrompt,
-    protocol: candidateAssessmentProtocol,
-  })
+  prompts.register({ name: 'candidate-assessment', version: '1', prompt: candidateAssessmentPrompt, protocol: candidateAssessmentProtocol })
 
-  // 事件总线：工具事件 → SSE 推送
   const eventBus = createEventBus()
-
-  // 上下文管理器：滑动窗口裁剪（200 条消息）
   const contextManager = createContextManager({ maxMessages: 200 })
+  const fileStorage = createFileStorage({ dataDir: join(getProgramDir(), 'data', 'files') })
+  const skillStore = createSkillStore(database)
+  const sessionMeta = createSessionStore(database)
 
   const runtime = createSqliteAgentRuntime({
     database,
@@ -87,10 +139,15 @@ export function createBrowserExtensionBff(options: {
     prompts,
     audit,
     context: contextManager,
+    maxSteps: 50,
     ...(options.llmTrace ? { llmTrace: options.llmTrace } : {}),
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
+
+  // 注册 remote 工具
   for (const tool of browserToolDefinitions) runtime.tools.register(tool)
+  // 注册 server 端文件工具
+  for (const tool of createFileTools(fileStorage)) runtime.tools.register(tool)
 
   // WebSocket 执行器
   const wsExecutor = createWsExecutor({
@@ -98,12 +155,12 @@ export function createBrowserExtensionBff(options: {
       const token = req.url?.match(/[?&]token=([^&]+)/)?.[1] ?? ''
       return token && token === options.apiToken ? { subject: 'browser-extension' } : null
     },
-    onConnectionChange: (online) => {
-      eventBus.emit({ type: 'executor_status', data: { online } })
+    onConnectionChange: (online: boolean, info?: { tabUrl?: string; tabTitle?: string }) => {
+      eventBus.emit({ type: 'executor_status', data: { online, ...info } })
     },
   })
 
-  // 标准 BFF 路由（continue、tool-results）
+  // Hono app
   const app = createAgentBff({
     authenticate: async (request) => {
       const token = request.headers.get('authorization')?.replace(/^Bearer\s+/, '')
@@ -113,33 +170,46 @@ export function createBrowserExtensionBff(options: {
     audit,
   })
 
-  // 覆盖 run 路由：加入工具执行循环
+  // 鉴权辅助
+  async function authHeader(c: { req: { raw: Request } }): Promise<boolean> {
+    const token = c.req.raw.headers.get('authorization')?.replace(/^Bearer\s+/, '')
+    return token === options.apiToken
+  }
+  function authQuery(c: { req: { query: (k: string) => string | undefined } }): boolean {
+    return c.req.query('token') === options.apiToken
+  }
+
+  // 覆盖 run 路由：BFF 侧驱动工具循环
   app.post('/v1/agent/sessions/:sessionId/run', async (c) => {
     const requestId = `req-${Math.random().toString(36).slice(2)}`
     const startedAt = Date.now()
     try {
-      const identity = await authenticate(c.req.raw, options.apiToken)
-      if (!identity) {
-        audit?.log({ requestId, durationMs: Date.now() - startedAt, errorCode: 'UNAUTHORIZED' })
+      if (!await authHeader(c)) {
         return c.json({ code: 'UNAUTHORIZED', requestId, message: '未通过 BFF 鉴权' }, 401)
       }
-      const body = await c.req.json<{ input?: unknown; context?: unknown; promptName?: unknown; skipTools?: unknown; stepMode?: unknown }>()
-      if (typeof body.input !== 'string' || !body.input.trim() || !body.context || typeof body.context !== 'object' || Array.isArray(body.context)) {
+      const body = await c.req.json<{ input?: unknown; context?: unknown; promptName?: unknown; skipTools?: unknown }>()
+      if (typeof body.input !== 'string' || !body.input.trim() || !body.context || typeof body.context !== 'object') {
         return c.json({ code: 'REQUEST_INVALID', requestId, message: '请求参数不合法' }, 400)
       }
 
-      const scopedSessionId = `${identity.subject}:${c.req.param('sessionId')}`
-      // 第一步：调用 harness.run()
+      const shortId = c.req.param('sessionId')
+      const scopedSessionId = `browser-extension:${shortId}`
+      sessionMeta.ensure(shortId)
+
+      // 注入 fileList 到 context
+      const context = { ...(body.context as Record<string, unknown>) }
+      const fileList = fileStorage.buildFileList()
+      if (fileList.length > 0) context.fileList = fileList
+
       let result = await runtime.harness.run({
         sessionId: scopedSessionId,
         input: body.input,
-        context: body.context as Record<string, unknown>,
+        context,
         ...(body.promptName ? { promptName: body.promptName as string } : {}),
         ...(body.skipTools === true ? { skipTools: true } : {}),
         stepMode: true,
       })
 
-      // 工具执行循环：处理 pending_tool_calls → WS 执行 → resume → 继续
       let stepCount = 0
       while (result.type !== 'final') {
         if (result.type === 'pending_tool_calls') {
@@ -151,17 +221,34 @@ export function createBrowserExtensionBff(options: {
             let output: unknown
             try {
               output = await wsExecutor.executeTool({ callId: call.callId, toolName: call.toolName, input: call.input })
+              // 截图特殊处理：base64 存磁盘，返回 fileId
+              if (call.toolName === 'browser_screenshot' && output && typeof output === 'object') {
+                const o = output as Record<string, unknown>
+                if (o.dataUrl && typeof o.dataUrl === 'string') {
+                  const shot = fileStorage.saveScreenshot(o.dataUrl as string, Number(o.width) || 0, Number(o.height) || 0)
+                  output = { screenshotId: shot.id, width: shot.width, height: shot.height, persisted: true, message: '截图已保存' }
+                }
+              }
             } catch (error) {
               output = { ok: false, code: 'EXECUTOR_ERROR', message: error instanceof Error ? error.message : '执行器错误' }
             }
             const durationMs = Date.now() - startedAt
-            eventBus.emit({ type: 'tool_end', data: { callId: call.callId, toolName: call.toolName, ok: true, outputPreview: output, durationMs } })
+            const isOk = !(typeof output === 'object' && output && (output as Record<string, unknown>).ok === false)
+            eventBus.emit({ type: 'tool_end', data: { callId: call.callId, toolName: call.toolName, ok: isOk, outputPreview: output, durationMs } })
 
             result = await runtime.harness.resume({ sessionId: scopedSessionId, callId: call.callId, output })
           }
         } else if (result.type === 'step_done') {
           result = await runtime.harness.continue({ sessionId: scopedSessionId })
         }
+      }
+
+      sessionMeta.touch(shortId)
+
+      // 自动生成会话标题（异步，不阻塞响应）
+      const meta = sessionMeta.get(shortId)
+      if (meta && !meta.titleGenerated) {
+        void generateSessionTitle(runtime, scopedSessionId, shortId, body.input, sessionMeta, audit).catch(() => {})
       }
 
       eventBus.emit({ type: 'done', data: { sessionId: scopedSessionId } })
@@ -174,11 +261,9 @@ export function createBrowserExtensionBff(options: {
     }
   })
 
-  // SSE 事件流路由
+  // SSE
   app.get('/api/events', async (c) => {
-    const token = c.req.query('token')
-    if (token !== options.apiToken) return c.json({ code: 'UNAUTHORIZED' }, 401)
-
+    if (!authQuery(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
     c.header('content-type', 'text/event-stream')
     c.header('cache-control', 'no-cache')
     c.header('connection', 'keep-alive')
@@ -188,44 +273,138 @@ export function createBrowserExtensionBff(options: {
     const writer = writable.getWriter()
     const encoder = new TextEncoder()
 
-    // 发送历史事件
     for (const event of eventBus.getHistory()) {
       await writer.write(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`))
     }
-
-    // 订阅新事件
     const unsub = eventBus.subscribe((event) => {
-      if (!closed) {
-        writer.write(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`)).catch(() => { closed = true })
-      }
+      if (!closed) writer.write(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`)).catch(() => { closed = true })
     })
-
-    // 心跳
     const heartbeat = setInterval(() => {
       if (!closed) writer.write(encoder.encode(': heartbeat\n\n')).catch(() => { closed = true })
     }, 15000)
-
-    // 客户端断开时清理
     c.req.raw.signal?.addEventListener('abort', () => {
-      closed = true
-      unsub()
-      clearInterval(heartbeat)
-      writer.close().catch(() => {})
+      closed = true; unsub(); clearInterval(heartbeat); writer.close().catch(() => {})
     })
-
     return c.newResponse(readable)
   })
 
-  return { app, runtime, database, prompts, eventBus, wsExecutor, ready: seedSecret(runtime, options.llm) }
+  // 消息历史
+  app.get('/api/sessions/:sessionId/messages', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    const scopedId = `browser-extension:${c.req.param('sessionId')}`
+    const messages = await runtime.sessions.load(scopedId)
+    return c.json({ messages })
+  })
+
+  // 会话列表
+  app.get('/api/sessions', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    return c.json({ sessions: sessionMeta.list() })
+  })
+
+  // 删除会话
+  app.delete('/api/sessions/:sessionId', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    sessionMeta.delete(`browser-extension:${c.req.param('sessionId')}`)
+    return c.json({ ok: true })
+  })
+
+  // Skills CRUD
+  app.get('/api/skills', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    return c.json({ skills: skillStore.list() })
+  })
+  app.post('/api/skills', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    const body = await c.req.json<{ name: string; firstInstruction: string; finalReplySummary: string }>()
+    const skill = skillStore.save(body.name, body.firstInstruction, body.finalReplySummary)
+    return c.json({ skill })
+  })
+  app.delete('/api/skills/:id', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    skillStore.delete(c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  // 文件列表
+  app.get('/api/files', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    return c.json({ files: fileStorage.listFiles() })
+  })
+
+  // 文件下载
+  app.get('/api/files/:id/download', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    const filePath = fileStorage.getFilePath(c.req.param('id'))
+    if (!filePath) return c.json({ code: 'NOT_FOUND' }, 404)
+    const file = fileStorage.getFile(c.req.param('id'))
+    const nodeRes = (c.env as Record<string, unknown>)?.nodeRes as ServerResponse | undefined
+    if (nodeRes) {
+      nodeRes.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(file?.filename || 'download')}"`)
+      nodeRes.setHeader('content-type', 'application/octet-stream')
+      createReadStream(filePath).pipe(nodeRes)
+      return c.newResponse(null)
+    }
+    const content = readFileSync(filePath)
+    return new Response(content, {
+      headers: {
+        'content-disposition': `attachment; filename="${encodeURIComponent(file?.filename || 'download')}"`,
+        'content-type': 'application/octet-stream',
+      },
+    })
+  })
+
+  // 文件删除
+  app.delete('/api/files/:id', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    fileStorage.deleteFile(c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  // 文件上传
+  app.post('/api/files/upload', async (c) => {
+    if (!await authHeader(c)) return c.json({ code: 'UNAUTHORIZED' }, 401)
+    const formData = await c.req.raw.formData()
+    const file = formData.get('file') as File | null
+    if (!file) return c.json({ code: 'NO_FILE' }, 400)
+    const content = await file.text()
+    const saved = fileStorage.saveTextFile(file.name, content)
+    return c.json({ file: saved })
+  })
+
+  return { app, runtime, database, prompts, eventBus, wsExecutor, fileStorage, skillStore, sessionMeta, ready: seedSecret(runtime, options.llm) }
 }
 
-/** 请求鉴权：Bearer Token 比对。 */
+async function generateSessionTitle(
+  runtime: { harness: { run: (r: { sessionId: string; input: string; context: Record<string, unknown>; promptName: string; skipTools: boolean }) => Promise<{ type: string; output?: unknown; reasoning?: string }> } },
+  scopedId: string,
+  shortId: string,
+  firstInput: string,
+  sessionMeta: ReturnType<typeof createSessionStore>,
+  audit: AuditLogger | undefined,
+) {
+  try {
+    const result = await runtime.harness.run({
+      sessionId: scopedId,
+      input: `根据以下对话内容，生成一个10-20字的中文标题，概括这个任务的主题。只输出标题文本，不要标点、不要解释、不要引号。\n\n${firstInput.slice(0, 500)}`,
+      context: {},
+      promptName: 'planning',
+      skipTools: true,
+    })
+    if (result.type === 'final' && typeof result.output === 'string') {
+      const title = result.output.trim().slice(0, 30)
+      if (title) sessionMeta.updateTitle(shortId, title)
+    }
+  } catch (error) {
+    audit?.log({ requestId: 'title-gen', durationMs: 0, errorCode: error instanceof Error ? error.message : 'title gen failed' })
+  }
+}
+
 async function authenticate(request: Request, apiToken: string): Promise<{ subject: string } | null> {
   const token = request.headers.get('authorization')?.replace(/^Bearer\s+/, '')
   return token && token === apiToken ? { subject: 'browser-extension' } : null
 }
 
-/** 把任意错误归一化为 { code, requestId, message }。 */
 function toErrorPayload(error: unknown, requestId: string): { code: string; requestId: string; message: string } {
   if (error instanceof Error && 'code' in error) {
     return { code: (error as { code: string }).code, requestId, message: error.message }
@@ -233,61 +412,66 @@ function toErrorPayload(error: unknown, requestId: string): { code: string; requ
   return { code: 'INTERNAL', requestId, message: '服务内部错误' }
 }
 
-/** 把环境提供的模型配置写入加密密钥库；未提供时保留库中已有配置。 */
 async function seedSecret(runtime: { secrets: { put(secret: LlmSecret): Promise<void> } }, llm?: LlmSecret): Promise<void> {
   if (!llm) return
   await runtime.secrets.put(llm)
 }
 
-/** 用 Node 原生 http + ws 启动 BFF。 */
 export function startServer(options: { masterKey: string; apiToken: string; port?: number; llm?: LlmSecret; llmMaxRetries?: number; llmTrace?: (event: LlmTraceEvent) => void; databasePath?: string }) {
   const { app, ready, wsExecutor } = createBrowserExtensionBff(options)
   let publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
   if (!existsSync(publicDir)) {
-    // 编译后 public 目录在 dist 的上级
     publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public')
   }
 
   const wss = new WebSocketServer({ noServer: true })
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // 密钥写入是异步的；先等它完成再处理请求
     await ready
-
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
 
-    // 根路径：返回 Web UI
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      const indexPath = join(publicDir, 'index.html')
       try {
-        const content = readFileSync(indexPath, 'utf-8')
+        const content = readFileSync(join(publicDir, 'index.html'), 'utf-8')
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
         res.end(content)
-        return
       } catch {
-        res.writeHead(404)
-        res.end('Not Found')
-        return
+        res.writeHead(404); res.end('Not Found')
       }
+      return
     }
 
-    // 其余请求交给 Hono
+    // 文件下载特殊处理（需要 Node res 流）
+    if (req.method === 'GET' && url.pathname.startsWith('/api/files/') && url.pathname.endsWith('/download')) {
+      const token = url.searchParams.get('token')
+      if (token !== options.apiToken) { res.writeHead(401); res.end('Unauthorized'); return }
+      const id = url.pathname.split('/')[3]
+      // 交给 Hono 处理，传入 nodeRes
+      const headers = new Headers()
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (typeof value === 'string') headers.set(key, value)
+      }
+      const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, { headers })
+      const response = await app.fetch(request, { nodeRes: res })
+      if (!res.writableEnded) {
+        res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
+        const buf = Buffer.from(await response.arrayBuffer())
+        res.end(buf)
+      }
+      return
+    }
+
     const headers = new Headers()
     for (const [key, value] of Object.entries(req.headers)) {
       if (typeof value === 'string') headers.set(key, value)
     }
     const body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req)
-    const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, {
-      method: req.method ?? 'GET',
-      headers,
-      body,
-    })
+    const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, { method: req.method ?? 'GET', headers, body })
     const response = await app.fetch(request)
     res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
     res.end(await response.text())
   })
 
-  // WebSocket upgrade
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (url.pathname === '/api/executor') {
@@ -304,7 +488,6 @@ export function startServer(options: { masterKey: string; apiToken: string; port
   return server
 }
 
-/** 读取请求体为文本（Node 原生流）。 */
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
@@ -314,15 +497,6 @@ function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-/**
- * 从 exe/脚本 同目录的 .env 文件加载配置。
- *
- * 打包成 exe 后用户无法用 `set AGENT_KIT_MASTER_KEY=xxx` 逐个设环境变量，
- * 也不方便用 `--env-file`（exe 没有这个 flag）。所以在启动入口处手动读 .env，
- * 把 key=value 注入 process.env，已有的环境变量优先（命令行设置不被文件覆盖）。
- *
- * .env 文件格式：每行 `KEY=VALUE`，# 开头是注释，空行忽略。
- */
 function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
   const dir = getProgramDir()
   const envPath = join(dir, '.env')
@@ -336,94 +510,51 @@ function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
     if (eqIndex <= 0) continue
     const key = trimmed.slice(0, eqIndex).trim()
     const value = trimmed.slice(eqIndex + 1).trim().replace(/^["']|["']$/g, '')
-    if (process.env[key] === undefined) {
-      process.env[key] = value
-      loaded.push(key)
-    }
+    if (process.env[key] === undefined) { process.env[key] = value; loaded.push(key) }
   }
   return { loaded: true, path: envPath, vars: loaded }
 }
 
-/** 生成配置文件模板（首次启动时如果 .env 不存在则写入）。 */
 function ensureEnvTemplate(): void {
   const dir = getProgramDir()
   const envPath = join(dir, '.env')
   if (existsSync(envPath)) return
   const template = [
-    '# BFF 配置文件。填好后启动 exe 即可。',
-    '# 井号开头是注释，不用管。',
-    '',
-    '# 32 字节 base64url 主密钥。用于加解密 SQLite 中的模型密钥。',
-    "# 生成方法：在终端运行 openssl rand -base64 32 然后把 + 换成 -、/ 换成 _、去掉末尾 =",
+    '# BFF 配置文件。',
     'AGENT_KIT_MASTER_KEY=',
-    '',
-    '# 扩展访问 BFF 的接入凭证（不是 LLM API Key）。',
-    '# 随便取一个字符串，需与扩展设置里的「BFF 接入 token」一致。',
     'BFF_API_TOKEN=dev-token',
-    '',
-    '# 模型配置。只存在于 BFF 进程环境，扩展侧看不到。',
     'LLM_API_KEY=',
     'LLM_MODEL=deepseek-v4-flash',
-    '',
-    '# OpenAI 兼容端点。DeepSeek 用 https://api.deepseek.com',
-    '# 火山方舟用 https://ark.cn-beijing.volces.com/api/v3',
     'LLM_BASE_URL=https://api.deepseek.com',
-    '',
-    '# 日志级别：info（默认）或 verbose（打印 LLM 完整输入输出，排障用）',
     '# LOG_LEVEL=verbose',
-    '',
-    '# LLM 请求失败重试次数（0-5，默认 3）',
     '# LLM_MAX_RETRIES=3',
-    '',
-    '# 监听端口（默认 8787）',
     '# PORT=8787',
     '',
   ].join('\n')
   try {
     writeFileSync(envPath, template, 'utf-8')
     console.log(`[bff] 已生成配置文件模板：${envPath}`)
-    console.log('[bff] 请填写后重新启动。')
     process.exit(0)
-  } catch {
-    // 写不了也不阻塞 -- 用户可能手动建 .env。
-  }
+  } catch { /* ignore */ }
 }
 
-// 直接运行时启动（node dist/server.js 或 pkg 打包的 exe），被测试或库方式导入时不自动监听端口。
-// 判断逻辑：pkg 打包后 process.execPath === process.argv[0]；node 直跑时用 __filename（CJS bundle）或 import.meta.url（ESM）。
-// 注意：vitest 等测试运行器也会设置 process.argv[1]，所以额外检查 import.meta.url 或 __filename 必须精确匹配入口文件。
 const isMainModule = process.execPath === process.argv[0] ||
   (typeof __filename !== 'undefined' && process.argv[1] === __filename && !process.env.VITEST) ||
   (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}` && !process.env.VITEST)
+
 if (process.argv[1] && isMainModule && !process.env.VITEST) {
-  // 首次启动：如果同目录没有 .env，生成模板并退出，引导用户填写。
   ensureEnvTemplate()
-  // 从 .env 文件加载配置（已有的环境变量优先）。
   const envResult = loadEnvFile()
-  if (envResult.loaded) {
-    console.log(`[bff] 已从 ${envResult.path} 加载配置：${envResult.vars.join(', ')}`)
-  }
+  if (envResult.loaded) console.log(`[bff] 已从 ${envResult.path} 加载配置：${envResult.vars.join(', ')}`)
   const masterKey = process.env.AGENT_KIT_MASTER_KEY ?? ''
   const apiToken = process.env.BFF_API_TOKEN ?? ''
-  if (!masterKey || !apiToken) {
-    console.error('缺少配置：AGENT_KIT_MASTER_KEY 与 BFF_API_TOKEN')
-    console.error('请在 exe 同目录的 .env 文件中填写，或通过环境变量设置。')
-    process.exit(1)
-  }
+  if (!masterKey || !apiToken) { console.error('缺少 AGENT_KIT_MASTER_KEY 与 BFF_API_TOKEN'); process.exit(1) }
   const apiKey = process.env.LLM_API_KEY ?? ''
   const baseUrl = process.env.LLM_BASE_URL ?? 'https://api.deepseek.com'
   const model = process.env.LLM_MODEL ?? ''
-  if (!apiKey || !model) {
-    console.error('缺少配置：LLM_API_KEY 与 LLM_MODEL')
-    console.error('请在 exe 同目录的 .env 文件中填写，或通过环境变量设置。')
-    process.exit(1)
-  }
+  if (!apiKey || !model) { console.error('缺少 LLM_API_KEY 与 LLM_MODEL'); process.exit(1) }
   const logLevel = process.env.LOG_LEVEL ?? 'info'
-  const llmTrace =
-    logLevel === 'verbose'
-      ? createLlmVerboseLogger({ prefix: '[bff:llm]' })
-      : undefined
-  if (logLevel === 'verbose') console.log('[bff] LOG_LEVEL=verbose -- 将打印 LLM 请求与响应的完整内容（含 Prompt 正文）')
+  const llmTrace = logLevel === 'verbose' ? createLlmVerboseLogger({ prefix: '[bff:llm]' }) : undefined
   const llmMaxRetries = Number(process.env.LLM_MAX_RETRIES ?? '3')
   const port = Number(process.env.PORT ?? '8787')
   const dbPath = join(getProgramDir(), 'agent-kit.sqlite')

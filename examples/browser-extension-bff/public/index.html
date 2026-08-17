@@ -2,243 +2,504 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Browser AI Assistant</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浏览器 AI 助手</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus@2.9.8/dist/index.css">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; margin: 0; }
+html, body { height: 100%; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; }
 #app { height: 100vh; display: flex; flex-direction: column; }
-.chat-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #e4e7ed; flex-shrink: 0; background: #fff; }
-.chat-header h1 { font-size: 16px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; background: #f5f7fa; }
-.msg { max-width: 100%; }
-.msg.user { text-align: right; }
-.msg.user .bubble { display: inline-block; background: #409eff; color: #fff; padding: 8px 14px; border-radius: 8px 8px 2px 8px; text-align: left; max-width: 85%; word-wrap: break-word; font-size: 14px; line-height: 1.5; }
-.msg.assistant .bubble { display: inline-block; background: #fff; padding: 8px 14px; border-radius: 8px 8px 8px 2px; max-width: 85%; word-wrap: break-word; font-size: 14px; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
-.msg.error .bubble { background: #fef0f0; color: #f56c6c; }
-.tool-card { margin: 6px 0; font-size: 13px; }
-.tool-card .el-card__body { padding: 10px 14px; }
-.tool-card .tool-header { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.tool-card .tool-name { font-weight: 600; flex: 1; }
-.tool-card .tool-body { margin-top: 8px; border-top: 1px solid #ebeef5; padding-top: 8px; }
-.tool-card .tool-body pre { background: #f5f7fa; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin: 4px 0; max-height: 200px; overflow-y: auto; }
-#input-area { padding: 8px 12px; border-top: 1px solid #e4e7ed; background: #fff; flex-shrink: 0; }
-#input-area .input-row { display: flex; gap: 8px; align-items: flex-end; }
-#input-area textarea { flex: 1; resize: none; font-size: 14px; min-height: 36px; max-height: 120px; }
-#prompt-bar { padding: 4px 12px; border-top: 1px solid #e4e7ed; background: #fafafa; flex-shrink: 0; }
-.sss-indicator { font-size: 12px; color: #909399; }
+
+.panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.title-row { display: flex; align-items: center; gap: 6px; }
+
+.page-context {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; background: var(--el-fill-color-light); border-radius: 4px;
+}
+.url-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+
+.conversation {
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px;
+}
+.turn { padding: 8px 10px; border-radius: 6px; background: var(--el-fill-color-lighter); min-width: 0; overflow: hidden; }
+.turn-header { display: flex; align-items: center; justify-content: space-between; }
+.turn-user { background: var(--el-color-primary-light-9); }
+.turn-error { background: var(--el-color-danger-light-9); }
+.turn-text {
+  white-space: pre-wrap; word-break: break-word; font-size: 13px;
+  margin-top: 2px; overflow-wrap: anywhere; min-width: 0;
+}
+.markdown-body { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.markdown-body p { margin: 4px 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin: 8px 0 4px; font-size: 14px; font-weight: 600; }
+.markdown-body h1 { font-size: 16px; }
+.markdown-body h2 { font-size: 15px; }
+.markdown-body ul, .markdown-body ol { margin: 4px 0; padding-left: 20px; }
+.markdown-body li { margin: 2px 0; }
+.markdown-body code { background: var(--el-fill-color-dark); padding: 1px 4px; border-radius: 3px; font-size: 12px; font-family: monospace; }
+.markdown-body pre { background: var(--el-fill-color-dark); padding: 8px; border-radius: 4px; overflow-x: auto; max-width: 100%; margin: 4px 0; }
+.markdown-body pre code { background: none; padding: 0; }
+.markdown-body blockquote { border-left: 3px solid var(--el-border-color); padding-left: 10px; margin: 4px 0; color: var(--el-text-color-secondary); }
+.markdown-body a { color: var(--el-color-primary); text-decoration: none; }
+.markdown-body table { border-collapse: collapse; width: 100%; margin: 4px 0; display: block; overflow-x: auto; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--el-border-color); padding: 4px 8px; font-size: 12px; }
+.markdown-body strong { font-weight: 600; }
+
+.turn-steps { margin-top: 6px; }
+.step-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.step-copy { flex-shrink: 0; margin-left: auto; }
+
+.live-steps {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; background: var(--el-color-info-light-9); border-radius: 4px; flex-shrink: 0;
+}
+
+.plan-card { border: 1px solid var(--el-color-primary-light-5); }
+.plan-header { display: flex; align-items: center; gap: 8px; }
+.plan-reasoning { margin: 8px 0; }
+.reasoning-text {
+  margin: 0; padding: 8px; background: var(--el-fill-color-lighter); border-radius: 4px;
+  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: var(--el-text-color-secondary);
+}
+.plan-steps { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.plan-step { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plan-actions { display: flex; gap: 10px; margin-top: 12px; }
+
+.input-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.input-toolbar .el-button { margin-left: 0; padding-left: 4px; }
+
+.session-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 160px; }
+.session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+
+.spacer { flex: 1; }
 </style>
 </head>
 <body>
 <div id="app">
-  <div class="chat-header">
-    <h1>浏览器 AI 助手</h1>
-    <span class="sse-indicator" v-if="sseConnected">● SSE 已连接</span>
-    <span class="sse-indicator" v-else style="color:#f56c6c">● SSE 断开</span>
-    <el-button size="small" @click="newSession">新建</el-button>
-  </div>
-
-  <div id="messages" ref="msgContainer">
-    <div v-for="(msg, i) in messages" :key="i" :class="'msg ' + msg.role">
-      <div class="bubble">
-        <div v-if="msg.role === 'assistant' && msg.toolCalls">
-          <div v-for="(tc, j) in msg.toolCalls" :key="j" class="tool-card">
-            <el-card shadow="never">
-              <div class="tool-header" @click="toggleTool(tc.callId)">
-                <span class="tool-name">{{ tc.toolName }}</span>
-                <el-tag v-if="tc.status === 'running'" type="warning" size="small">运行中</el-tag>
-                <el-tag v-else-if="tc.status === 'ok'" type="success" size="small">{{ tc.durationMs }}ms</el-tag>
-                <el-tag v-else-if="tc.status === 'fail'" type="danger" size="small">失败</el-tag>
-                <el-icon><el-icon-arrow-down v-if="!tc.expanded" /><el-icon-arrow-up v-else /></el-icon>
-              </div>
-              <div v-if="tc.expanded" class="tool-body">
-                <pre>输入: {{ JSON.stringify(tc.input, null, 2) }}</pre>
-                <pre v-if="tc.output">输出: {{ typeof tc.output === 'string' ? tc.output : JSON.stringify(tc.output, null, 2) }}</pre>
-              </div>
-            </el-card>
-          </div>
-          <div v-if="msg.text" style="margin-top:8px">{{ msg.text }}</div>
+  <el-card shadow="never" style="height:100vh;border:none;border-radius:0;display:flex;flex-direction:column;">
+    <template #header>
+      <div class="panel-header">
+        <div class="title-row">
+          <el-text tag="b">自由指令</el-text>
         </div>
-        <div v-else-if="msg.role === 'user'">{{ msg.text }}</div>
-        <div v-else-if="msg.role === 'error'">{{ msg.text }}</div>
-        <div v-else>{{ msg.text }}</div>
+        <el-space>
+          <el-dropdown v-if="sessions.length" trigger="click" @command="handleSessionCommand">
+            <el-button link size="small" :disabled="isBusy">
+              会话 {{ sessionIndex }}
+              <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="s in sessions" :key="s.id" :command="s.id" :disabled="s.id === sessionId">
+                  <span class="session-item">
+                    <span class="session-title">{{ s.title }}</span>
+                  </span>
+                </el-dropdown-item>
+                <el-dropdown-item divided command="__new__" :disabled="isBusy">＋ 新会话</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button v-else link size="small" :disabled="isBusy" @click="newSession">新会话</el-button>
+        </el-space>
       </div>
-    </div>
-  </div>
+    </template>
 
-  <div id="prompt-bar">
-    <el-select v-model="promptName" size="small" style="width:100%">
-      <el-option value="free-form" label="自由指令" />
-      <el-option value="planning" label="规划" />
-      <el-option value="browser-automation" label="浏览器自动化" />
-      <el-option value="candidate-assessment" label="评估" />
-    </el-select>
-  </div>
+    <el-space direction="vertical" fill :size="10" style="width:100%;flex:1;min-height:0;overflow:hidden">
 
-  <div id="input-area">
-    <div class="input-row">
+      <div v-if="pageTitle || pageUrl" class="page-context">
+        <el-text size="small" type="info" truncated>{{ pageTitle || '(未获取页面标题)' }}</el-text>
+        <el-tooltip v-if="pageUrl" :content="pageUrl" placement="top">
+          <el-text size="small" type="info" class="url-text">{{ shortUrl }}</el-text>
+        </el-tooltip>
+      </div>
+
+      <div v-if="turns.length" class="conversation">
+        <div v-for="(turn, index) in turns" :key="index" :class="['turn', `turn-${turn.role}`]">
+          <div class="turn-header">
+            <el-text size="small" tag="b">{{ turn.role === 'user' ? '你' : turn.role === 'agent' ? 'Agent' : '错误' }}</el-text>
+          </div>
+          <div v-if="turn.role === 'agent'" class="turn-text markdown-body" v-html="renderMarkdown(turn.text)"></div>
+          <div v-else class="turn-text">{{ turn.text }}</div>
+          <el-collapse v-if="turn.steps && turn.steps.length" class="turn-steps">
+            <el-collapse-item :title="`执行了 ${turn.steps.length} 步`" :name="index">
+              <div v-for="step in turn.steps" :key="step.step" class="step-row">
+                <el-tag size="small" effect="plain">{{ step.step }}</el-tag>
+                <el-text size="small">{{ step.toolName }}</el-text>
+                <el-tag size="small" :type="stepSummary(step.output).type" effect="plain">{{ stepSummary(step.output).text }}</el-tag>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </div>
+
+      <div v-if="isBusy && currentSteps.length" class="live-steps">
+        <el-text size="small" type="info">正在执行第 {{ currentSteps.length }} 步…</el-text>
+        <div v-for="step in currentSteps.slice(-3)" :key="step.step" class="step-row">
+          <el-tag size="small" effect="plain">{{ step.step }}</el-tag>
+          <el-text size="small">{{ step.toolName }}</el-text>
+          <el-tag size="small" :type="stepSummary(step.output).type" effect="plain">{{ stepSummary(step.output).text }}</el-tag>
+        </div>
+      </div>
+
+      <div class="input-toolbar">
+        <el-select v-model="promptName" size="small" style="width:140px">
+          <el-option value="free-form" label="自由指令" />
+          <el-option value="planning" label="规划" />
+          <el-option value="browser-automation" label="浏览器自动化" />
+          <el-option value="candidate-assessment" label="评估" />
+        </el-select>
+      </div>
       <el-input
-        v-model="inputText"
+        v-model="instruction"
         type="textarea"
-        :rows="2"
-        :disabled="running"
-        placeholder="描述你想做的事..."
-        @keydown.enter.prevent="!$event.shiftKey && send()"
+        :rows="3"
+        resize="none"
+        :disabled="isBusy"
+        placeholder="用一句话描述你想做什么，例如：在搜索框输入 Vue3 并搜索"
+        @keydown.enter.meta.prevent="requestPlan"
       />
-      <el-button type="primary" :loading="running" @click="send" :disabled="!inputText.trim()">发送</el-button>
-      <el-button v-if="running" type="danger" @click="stop">停止</el-button>
-    </div>
-  </div>
+
+      <el-space wrap>
+        <el-button type="primary" :loading="isPlanning" :disabled="!canSubmit" @click="requestPlan">
+          {{ isPlanning ? '评估中...' : '评估' }}
+        </el-button>
+        <el-button v-if="isBusy && !isPlanning" type="danger" plain @click="stop">停止</el-button>
+        <el-text size="small" type="info">⌘ + Enter 快速评估</el-text>
+      </el-space>
+
+      <el-card v-if="pendingPlan" shadow="never" class="plan-card">
+        <template #header>
+          <div class="plan-header">
+            <el-text tag="b">任务评估</el-text>
+            <el-tag :type="pendingPlan.feasible ? 'success' : 'danger'" effect="plain" size="small">
+              {{ pendingPlan.feasible ? '可行' : '不可行' }}
+            </el-tag>
+            <el-tag v-if="pendingPlan.feasible" :type="pendingPlan.confidence === 'high' ? 'success' : pendingPlan.confidence === 'medium' ? 'warning' : 'danger'" effect="plain" size="small">
+              置信度：{{ pendingPlan.confidence === 'high' ? '高' : pendingPlan.confidence === 'medium' ? '中' : '低' }}
+            </el-tag>
+          </div>
+        </template>
+        <el-text size="small">{{ pendingPlan.summary }}</el-text>
+        <el-collapse v-if="planReasoning" class="plan-reasoning">
+          <el-collapse-item title="模型思考过程">
+            <pre class="reasoning-text">{{ planReasoning }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+        <div v-if="pendingPlan.steps.length" class="plan-steps">
+          <div v-for="(step, idx) in pendingPlan.steps" :key="idx" class="plan-step">
+            <el-text size="small" tag="b">{{ idx + 1 }}.</el-text>
+            <el-text size="small">{{ step.action }}</el-text>
+            <el-tag size="small" :type="step.write ? 'warning' : 'info'" effect="plain">{{ step.tool }}</el-tag>
+            <el-text v-if="step.note" size="small" type="warning">{{ step.note }}</el-text>
+          </div>
+        </div>
+        <el-alert v-if="pendingPlan.risks.length" type="warning" :closable="false" show-icon :title="`风险：${pendingPlan.risks.join('；')}`" />
+        <el-alert v-if="pendingPlan.cannotDo.length" type="error" :closable="false" show-icon :title="`无法完成：${pendingPlan.cannotDo.join('；')}`" />
+        <div v-if="pendingPlan.feasible" class="plan-actions">
+          <el-button type="primary" @click="confirmPlan">确认执行</el-button>
+          <el-button @click="rejectPlan">取消</el-button>
+        </div>
+        <div v-else class="plan-actions">
+          <el-button @click="rejectPlan">知道了</el-button>
+        </div>
+      </el-card>
+
+      <el-alert
+        v-if="runError && runState === 'failed'"
+        :title="runError.message"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+    </el-space>
+  </el-card>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.8/dist/index.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <script>
-const { createApp, ref, nextTick, onMounted, onUnmounted } = Vue;
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
 createApp({
   setup() {
-    const inputText = ref('');
-    const messages = ref([]);
-    const running = ref(false);
+    const instruction = ref('');
+    const turns = ref([]);
+    const currentSteps = ref([]);
+    const sessionId = ref(localStorage.getItem('bff-session-id') || crypto.randomUUID());
+    const sessions = ref([]);
+    const runState = ref('idle');
+    const runError = ref(null);
+    const isPlanning = ref(false);
+    const pendingPlan = ref(null);
+    const planReasoning = ref('');
     const promptName = ref('free-form');
-    const sseConnected = ref(false);
-    const msgContainer = ref(null);
+    const pageTitle = ref('');
+    const pageUrl = ref('');
+
     let eventSource = null;
     let abortController = null;
-    let sessionId = localStorage.getItem('bff-session-id') || crypto.randomUUID();
 
-    function saveSessionId() { localStorage.setItem('bff-session-id', sessionId); }
+    const token = new URLSearchParams(location.search).get('token') || '';
+    const bffBase = location.origin;
 
-    function scrollBottom() {
-      nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight; });
+    const isBusy = computed(() => runState.value === 'running' || isPlanning.value);
+    const canSubmit = computed(() => instruction.value.trim().length > 0 && !isBusy.value);
+    const sessionIndex = computed(() => {
+      const i = sessions.value.findIndex(s => s.id === sessionId.value);
+      return i >= 0 ? i + 1 : sessions.value.length + 1;
+    });
+    const shortUrl = computed(() => {
+      if (!pageUrl.value) return '';
+      try {
+        const u = new URL(pageUrl.value);
+        const path = u.pathname.replace(/\/+$/, '');
+        const full = path ? `${u.host}${path}` : u.host;
+        return full.length > 40 ? full.slice(0, 40) + '…' : full;
+      } catch { return pageUrl.value; }
+    });
+
+    function saveSessionId() { localStorage.setItem('bff-session-id', sessionId.value); }
+
+    function renderMarkdown(text) {
+      try {
+        const raw = marked.parse(text || '', { async: false, breaks: true });
+        return DOMPurify.sanitize(raw);
+      } catch { return text || ''; }
     }
 
-    function addMsg(role, text, toolCalls) {
-      messages.value.push({ role, text, toolCalls: toolCalls || [] });
+    function stepSummary(output) {
+      const r = (output || {});
+      if (r.ok === false) return { text: String(r.message || '失败').slice(0, 60), type: 'danger' };
+      if (Array.isArray(r.entries)) return { text: `快照 ${r.entries.length} 个元素`, type: 'success' };
+      if (typeof r.passed === 'boolean') return { text: r.passed ? '验证通过' : '验证未通过', type: r.passed ? 'success' : 'danger' };
+      if (typeof r.satisfied === 'boolean') return { text: r.satisfied ? `等待完成（${r.observed||''}）` : `等待超时（${r.observed||''}）`, type: r.satisfied ? 'success' : 'warning' };
+      return { text: String(r.message || '完成').slice(0, 60), type: 'success' };
+    }
+
+    function scrollBottom() {
+      nextTick(() => {
+        const el = document.querySelector('.conversation');
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    }
+
+    function appendTurn(role, text, steps) {
+      turns.value.push({ role, text, steps: steps || [] });
       scrollBottom();
     }
 
-    function toggleTool(callId) {
-      for (const msg of messages.value) {
-        if (msg.toolCalls) {
-          for (const tc of msg.toolCalls) {
-            if (tc.callId === callId) tc.expanded = !tc.expanded;
-          }
-        }
-      }
-    }
-
+    // ── SSE ──────────────────────────────────────────
     function connectSSE() {
       if (eventSource) eventSource.close();
-      const params = new URLSearchParams(location.search);
-      const token = params.get('token') || '';
       if (!token) return;
-      eventSource = new EventSource('/api/events?token=' + encodeURIComponent(token) + '&sessionId=' + encodeURIComponent(sessionId));
-      eventSource.onopen = () => { sseConnected.value = true; };
+      eventSource = new EventSource(`${bffBase}/api/events?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId.value)}`);
       eventSource.addEventListener('tool_start', (e) => {
         try {
           const d = JSON.parse(e.data);
-          // Find the last assistant message and add a tool call
-          for (let i = messages.value.length - 1; i >= 0; i--) {
-            const msg = messages.value[i];
-            if (msg.role === 'assistant') {
-              if (!msg.toolCalls) msg.toolCalls = [];
-              msg.toolCalls.push({ callId: d.callId, toolName: d.toolName, input: d.input, status: 'running', expanded: false });
-              break;
-            }
-          }
+          currentSteps.value.push({ step: currentSteps.value.length + 1, toolName: d.toolName, input: d.input, output: null });
           scrollBottom();
         } catch {}
       });
       eventSource.addEventListener('tool_end', (e) => {
         try {
           const d = JSON.parse(e.data);
-          for (const msg of messages.value) {
-            if (msg.toolCalls) {
-              for (const tc of msg.toolCalls) {
-                if (tc.callId === d.callId) {
-                  tc.status = d.ok ? 'ok' : 'fail';
-                  tc.output = d.outputPreview;
-                  tc.durationMs = d.durationMs;
-                }
-              }
+          for (const s of currentSteps.value) {
+            if (s.toolName === d.toolName && s.output === null) {
+              s.output = d.outputPreview;
+              break;
             }
           }
-          scrollBottom();
         } catch {}
       });
-      eventSource.addEventListener('error', () => {});
+      eventSource.addEventListener('executor_status', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          if (d.tabUrl) pageUrl.value = d.tabUrl;
+          if (d.tabTitle) pageTitle.value = d.tabTitle;
+        } catch {}
+      });
+      eventSource.onerror = () => {};
     }
 
-    function disconnectSSE() {
-      if (eventSource) eventSource.close();
-      eventSource = null;
-      sseConnected.value = false;
-    }
-
-    async function send() {
-      const text = inputText.value.trim();
-      if (!text || running.value) return;
-      inputText.value = '';
-      running.value = true;
-      abortController = new AbortController();
-      addMsg('user', text);
-      saveSessionId();
-
-      const params = new URLSearchParams(location.search);
-      const token = params.get('token') || '';
-      const bffUrl = location.origin;
-
+    // ── 加载历史 ────────────────────────────────────
+    async function loadHistory() {
       try {
-        const response = await fetch(bffUrl + '/v1/agent/sessions/' + encodeURIComponent(sessionId) + '/run', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + token },
-          body: JSON.stringify({ input: text, context: { currentDate: new Date().toISOString() }, stepMode: true, promptName: promptName.value }),
-          signal: abortController.signal,
+        const resp = await fetch(`${bffBase}/api/sessions/${encodeURIComponent(sessionId.value)}/messages`, {
+          headers: { authorization: 'Bearer ' + token },
         });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          addMsg('error', '请求失败: ' + (err.message || response.statusText));
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const msgs = data.messages || [];
+        // 把 SessionMessage[] 转成 turns
+        const result = [];
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i];
+          if (m.role === 'user') {
+            result.push({ role: 'user', text: m.content, steps: [] });
+          } else if (m.role === 'assistant' && m.content) {
+            // 收集后续 tool 消息作为 steps
+            const steps = [];
+            let j = i + 1;
+            while (j < msgs.length && msgs[j].role === 'tool') {
+              steps.push({ step: steps.length + 1, toolName: msgs[j].toolName, output: msgs[j].content });
+              j++;
+            }
+            result.push({ role: 'agent', text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), steps });
+            i = j - 1;
+          } else if (m.role === 'assistant' && m.toolCalls) {
+            // assistant 发起了工具调用但还没 final text，收集 tool 结果
+            const steps = [];
+            let j = i + 1;
+            while (j < msgs.length && msgs[j].role === 'tool') {
+              steps.push({ step: steps.length + 1, toolName: msgs[j].toolName, output: msgs[j].content });
+              j++;
+            }
+            i = j - 1;
+            // 如果后面紧跟 final assistant text，会在下一轮处理
+            if (steps.length) result.push({ role: 'agent', text: '', steps });
+          }
+        }
+        turns.value = result;
+        scrollBottom();
+      } catch {}
+    }
+
+    // ── 发送 / 计划 ────────────────────────────────
+    async function sendToBff(input, context, promptName_, skipTools) {
+      const resp = await fetch(`${bffBase}/v1/agent/sessions/${encodeURIComponent(sessionId.value)}/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+        body: JSON.stringify({ input, context: context || {}, promptName: promptName_, skipTools: !!skipTools, stepMode: true }),
+        signal: abortController?.signal,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.message || `HTTP ${resp.status}`);
+      }
+      return resp.json();
+    }
+
+    async function requestPlan() {
+      const text = instruction.value.trim();
+      if (!text || isBusy.value) return;
+      isPlanning.value = true;
+      runError.value = null;
+      pendingPlan.value = null;
+      planReasoning.value = '';
+      try {
+        const result = await sendToBff(text, { currentDate: new Date().toISOString() }, 'planning', true);
+        if (result.type !== 'final') {
+          runError.value = { message: '计划阶段意外收到工具调用请求。' };
           return;
         }
-        const result = await response.json();
-        const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2);
-        addMsg('assistant', output);
+        pendingPlan.value = result.output;
+        planReasoning.value = result.reasoning || '';
       } catch (err) {
         if (err.name === 'AbortError') return;
-        addMsg('error', '请求失败: ' + err.message);
+        runError.value = { message: err.message };
       } finally {
-        running.value = false;
+        isPlanning.value = false;
+      }
+    }
+
+    async function confirmPlan() {
+      if (!pendingPlan.value) return;
+      pendingPlan.value = null;
+      await submitInstruction();
+    }
+
+    function rejectPlan() {
+      pendingPlan.value = null;
+      planReasoning.value = '';
+      runState.value = 'idle';
+      runError.value = null;
+    }
+
+    async function submitInstruction() {
+      const text = instruction.value.trim();
+      if (!text || isBusy.value) return;
+      instruction.value = '';
+      currentSteps.value = [];
+      runState.value = 'running';
+      runError.value = null;
+      abortController = new AbortController();
+      appendTurn('user', text);
+      ensureSseSession();
+
+      try {
+        const result = await sendToBff(text, { currentDate: new Date().toISOString() }, promptName.value, false);
+        const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2);
+        appendTurn('agent', output, currentSteps.value);
+        runState.value = 'succeeded';
+      } catch (err) {
+        if (err.name === 'AbortError') { runState.value = 'idle'; return; }
+        runError.value = { message: err.message };
+        appendTurn('error', err.message, currentSteps.value);
+        runState.value = 'failed';
+      } finally {
         abortController = null;
       }
     }
 
     function stop() {
       abortController?.abort();
-      running.value = false;
+      runState.value = 'idle';
     }
 
+    // ── 会话管理 ───────────────────────────────────
     function newSession() {
-      sessionId = crypto.randomUUID();
+      sessionId.value = crypto.randomUUID();
       saveSessionId();
-      messages.value = [];
-      disconnectSSE();
+      turns.value = [];
+      currentSteps.value = [];
+      runState.value = 'idle';
+      runError.value = null;
+      pendingPlan.value = null;
       connectSSE();
+    }
+
+    function handleSessionCommand(cmd) {
+      if (cmd === '__new__') { newSession(); return; }
+      // 切换会话（简化：刷新页面加载对应历史）
+      sessionId.value = cmd;
+      saveSessionId();
+      turns.value = [];
+      currentSteps.value = [];
+      runState.value = 'idle';
+      connectSSE();
+      loadHistory();
+    }
+
+    let lastSseSession = sessionId.value;
+    function ensureSseSession() {
+      if (sessionId.value !== lastSseSession) {
+        lastSseSession = sessionId.value;
+        connectSSE();
+      }
     }
 
     onMounted(() => {
+      saveSessionId();
       connectSSE();
+      loadHistory();
     });
 
     onUnmounted(() => {
-      disconnectSSE();
+      eventSource?.close();
     });
 
     return {
-      inputText, messages, running, promptName, sseConnected, msgContainer,
-      send, stop, newSession, toggleTool,
+      instruction, turns, currentSteps, sessions, sessionId, runState, runError,
+      isPlanning, pendingPlan, planReasoning, promptName, pageTitle, pageUrl,
+      isBusy, canSubmit, sessionIndex, shortUrl,
+      renderMarkdown, stepSummary,
+      requestPlan, confirmPlan, rejectPlan, submitInstruction, stop,
+      newSession, handleSessionCommand,
     };
   }
 }).use(ElementPlus).mount('#app');

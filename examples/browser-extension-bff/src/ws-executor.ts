@@ -9,7 +9,7 @@ export interface WsToolCall {
 
 export function createWsExecutor(options: {
   authenticate: (request: IncomingMessage) => Promise<{ subject: string } | null>
-  onConnectionChange?: (online: boolean) => void
+  onConnectionChange?: (online: boolean, info?: { tabUrl?: string; tabTitle?: string }) => void
 }) {
   let activeSocket: WebSocket | null = null
   const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
@@ -32,7 +32,7 @@ export function createWsExecutor(options: {
           const msg = JSON.parse(raw.toString())
           if (msg.type === 'register') {
             executorInfo = { tabUrl: msg.tabUrl, tabTitle: msg.tabTitle }
-            options.onConnectionChange?.(true)
+            options.onConnectionChange?.(true, executorInfo)
           } else if (msg.type === 'tool_result') {
             const p = pending.get(msg.callId)
             if (p) {
