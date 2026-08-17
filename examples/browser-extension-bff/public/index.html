@@ -363,7 +363,7 @@ const TOOLS_CATALOG = [
   { name: 'browser_write_file', title: '写入文件', category: 'file', description: '将文本保存到 BFF 文件存储' },
 ];
 
-createApp({
+const RootComponent = {
   setup() {
     const instruction = ref('');
     const turns = ref([]);
@@ -804,12 +804,6 @@ createApp({
 
     onUnmounted(() => { eventSource?.close(); });
 
-    // 注册图标
-    const icons = ElementPlusIconsVue;
-    for (const [key, comp] of Object.entries(icons)) {
-      app.component(key, comp);
-    }
-
     return {
       instruction, turns, currentSteps, sessions, sessionId, runState, runError,
       isPlanning, pendingPlan, planReasoning, promptName, pageTitle, pageUrl, executorOnline,
@@ -824,14 +818,17 @@ createApp({
       toggleAttach, isAttached, downloadFile, removeFile, triggerFilePicker, handleFileSelect, previewScreenshot,
       saveSkill, applySkill, deleteSkill, loadSkills,
       copyTurnText, copyDiagnosticLog, loadSessions,
-      // icons
-      QuestionFilled: icons.QuestionFilled, ArrowDown: icons.ArrowDown, Delete: icons.Delete,
-      CopyDocument: icons.CopyDocument, FolderOpened: icons.FolderOpened,
-      Star: icons.Star, Collection: icons.Collection, Upload: icons.Upload,
-      Document: icons.Document, Picture: icons.Picture,
     };
   }
-}).use(ElementPlus).mount('#app');
+};
+
+// 注册全部 Element Plus 图标为全局组件，供模板直接使用
+const app = createApp(RootComponent);
+const icons = ElementPlusIconsVue || {};
+for (const [key, comp] of Object.entries(icons)) {
+  app.component(key, comp);
+}
+app.use(ElementPlus).mount('#app');
 </script>
 </body>
 </html>
