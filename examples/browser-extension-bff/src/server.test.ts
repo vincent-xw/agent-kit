@@ -178,7 +178,12 @@ describe('browser-extension-bff 运行协议', () => {
     await run(app, 's-1', '你好')
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     const body = JSON.parse(init.body as string) as { tools?: Array<{ function: { name: string } }> }
-    expect(body.tools?.map((tool) => tool.function.name)).toEqual(browserToolDefinitions.map((tool) => tool.name))
+    expect(body.tools?.map((tool) => tool.function.name)).toEqual([
+      ...browserToolDefinitions.map((tool) => tool.name),
+      'browser_save_file',
+      'browser_read_file',
+      'browser_write_file',
+    ])
     database.close()
   })
 })
@@ -200,12 +205,16 @@ describe('browser-extension-bff 日志与错误红线', () => {
 })
 
 describe('浏览器工具定义', () => {
-  it('全部工具声明为 remote，不在服务端执行', () => {
+  it('browserToolDefinitions 全部声明为 remote，文件工具在 server 端动态注册', () => {
     expect(browserToolDefinitions.every((tool) => tool.execution === 'remote')).toBe(true)
     expect(browserToolDefinitions.every((tool) => tool.execute === undefined)).toBe(true)
+    // 文件工具不在此数组中
+    expect(browserToolDefinitions.find(t => t.name === 'browser_save_file')).toBeUndefined()
+    expect(browserToolDefinitions.find(t => t.name === 'browser_read_file')).toBeUndefined()
+    expect(browserToolDefinitions.find(t => t.name === 'browser_write_file')).toBeUndefined()
   })
 
-  it('覆盖闭环所需的全部工具', () => {
+  it('覆盖闭环所需的全部页面操作工具', () => {
     expect(browserToolDefinitions.map((tool) => tool.name)).toEqual([
       'browser_snapshot',
       'browser_read_page',
@@ -219,9 +228,6 @@ describe('浏览器工具定义', () => {
       'browser_verify',
       'browser_screenshot',
       'browser_go_back',
-      'browser_save_file',
-      'browser_read_file',
-      'browser_write_file',
     ])
   })
 

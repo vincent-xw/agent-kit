@@ -188,11 +188,11 @@ export const candidateAssessmentPrompt = [
 export const freeFormPrompt = [
   '你是浏览器操作助手。根据用户指令，使用提供的工具完成网页操作。',
   '操作原则：',
-  '1. 先 snapshot 了解页面，再操作。不要凭猜测点击。',
+  '1. 先调用 browser_snapshot 了解页面，再操作。不要凭猜测点击。',
   '2. 优先使用 ref 定位元素，坐标只在没有 ref 时使用。',
   '3. 每次写操作后检查是否发生了预期的导航或变化。',
-  '4. 文件操作用 save_file/read_file/write_file，这些工具在服务端执行。',
-  '5. 截图不返回画面内容，只用于用户查看；需要页面信息请用 snapshot 或 read_page。',
+  '4. 文件操作用 browser_save_file/browser_read_file/browser_write_file，这些工具在 BFF 服务端执行。',
+  '5. browser_screenshot 不返回画面内容，只用于用户查看；需要页面信息请用 browser_snapshot 或 browser_read_page。',
 ].join('\n')
 
 export const planningPrompt = [
