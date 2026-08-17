@@ -24,7 +24,7 @@ export class VisionClient {
           content: [
             {
               type: 'text',
-              text: '请描述这个手机屏幕上的内容，包括所有可见的UI元素、文字、按钮和输入框。注意屏幕上的中文内容，按从上到下的顺序描述。简短描述，不超过200字。',
+              text: '这是一个手机 App 的屏幕截图，背景干净、UI 元素规整排列。请按从上到下的顺序，列出所有可见的：\n- 顶部状态栏信息\n- 分类标签/选项卡\n- 应用图标及其名称（逐行、逐项）\n- 底部导航栏或搜索栏\n- 角标数字\n\n注意事项：\n- 这是一台手机的单屏截图，不是多台手机的对比图\n- 文字识别请尽量准确，不要编造不存在的应用\n- 如果某行有多个应用，请逐项列出\n- 请完整描述，不要省略细节',
             },
             {
               type: 'image_url',
@@ -33,7 +33,7 @@ export class VisionClient {
           ],
         },
       ],
-      max_tokens: 500,
+      max_tokens: 4096,
     }
 
     const response = await this.fetch(url, {
@@ -51,8 +51,12 @@ export class VisionClient {
       throw new Error(`视觉模型请求失败: HTTP ${response.status} ${text.slice(0, 200)}`)
     }
 
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
-    const content = data.choices?.[0]?.message?.content
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>
+    }
+    const msg = data.choices?.[0]?.message
+    // 部分模型（如 deepseek-r1、gemma 推理版）用 reasoning_content 而非 content
+    const content = msg?.content || msg?.reasoning_content
     if (!content) throw new Error('视觉模型响应缺少 choices[0].message.content')
     return content
   }
