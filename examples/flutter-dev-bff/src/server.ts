@@ -171,6 +171,10 @@ export function createFlutterDevBff(options: {
   })
 
   // ── Skills ──────────────────────────────────────────────
+  app.get('/api/history', (c) => {
+    return c.json({ runs: skillStore.getAllRuns() })
+  })
+
   app.get('/api/skills', (c) => {
     return c.json({ skills: skillStore.list() })
   })

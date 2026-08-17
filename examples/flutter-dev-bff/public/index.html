@@ -73,6 +73,9 @@
   #skills-panel { width: 420px; max-width: 92vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
   #skills-panel h2 { font-size: 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
   #skills-panel h2 button { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+  #skills-tabs { display: flex; gap: 0; }
+  #skills-tabs .tab { padding: 4px 12px; cursor: pointer; font-size: 13px; border-radius: 6px 6px 0 0; color: var(--text2); }
+  #skills-tabs .tab.active { color: var(--text); background: var(--bg); }
   .skill-card { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; cursor: pointer; transition: border-color 0.15s; }
   .skill-card:hover { border-color: var(--accent); }
   .skill-card .skill-name { font-weight: 600; color: var(--text); font-size: 14px; }
@@ -122,7 +125,7 @@
 <!-- Skills 面板 -->
 <div id="skills-overlay">
   <div id="skills-panel">
-    <h2>Skills <button id="skills-close">×</button></h2>
+    <h2><span id="skills-tabs"><span class="tab active" data-tab="skills">Skills</span><span class="tab" data-tab="history">历史</span></span> <button id="skills-close">×</button></h2>
     <div id="skills-content"></div>
   </div>
 </div>
@@ -205,6 +208,17 @@ skillsBtn.addEventListener('click', () => { skillsOverlay.classList.add('open');
 skillsClose.addEventListener('click', () => { skillsOverlay.classList.remove('open'); currentSkillSlug = null; });
 skillsOverlay.addEventListener('click', (e) => {
   if (e.target === skillsOverlay) { skillsOverlay.classList.remove('open'); currentSkillSlug = null; }
+});
+
+// ── Skills 面板：标签切换 ──
+document.querySelectorAll('#skills-tabs .tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('#skills-tabs .tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const t = tab.getAttribute('data-tab');
+    if (t === 'history') renderHistory();
+    else renderSkillList();
+  });
 });
 
 async function api(path, options = {}) {
@@ -318,6 +332,26 @@ function renderSkillEdit(skill, isNew) {
       alert('保存失败：' + err.message);
     }
   });
+}
+
+// 历史：显示所有 skill 的执行记录
+async function renderHistory() {
+  skillsContent.innerHTML = '<div class="generating">加载中…</div>';
+  try {
+    const data = await api('/api/history');
+    if (!data.runs || data.runs.length === 0) {
+      skillsContent.innerHTML = '<div class="empty-state">暂无执行记录。<br>创建并执行一个 Skill 后，这里会显示历史。</div>';
+      return;
+    }
+    skillsContent.innerHTML = data.runs.map(r => `
+      <div class="run-item" style="cursor:pointer" onclick="renderSkillDetail('${r.slug}')">
+        <div><span class="run-status ${r.status}">${escapeHtml(r.status)}</span> ${escapeHtml(r.meta.name)}</div>
+        <div class="run-time">${r.startedAt} ${r.summary ? '— ' + escapeHtml(r.summary.slice(0, 80)) : ''}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    skillsContent.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+  }
 }
 
 // 详情：查看 prompt + 执行历史 + 一键运行

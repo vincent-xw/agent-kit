@@ -97,6 +97,18 @@ export class SkillStore {
     this.addRun(slug, run)
   }
 
+  /** 获取所有 skill 的执行记录，按时间倒序。每条记录附带所属 skill 的 slug。 */
+  getAllRuns(): Array<{ slug: string; meta: SkillMeta } & SkillRun> {
+    const all: Array<{ slug: string; meta: SkillMeta } & SkillRun> = []
+    for (const { slug, meta } of this.list()) {
+      for (const run of this.loadRuns(slug)) {
+        all.push({ slug, meta, ...run })
+      }
+    }
+    all.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+    return all
+  }
+
   private loadRuns(slug: string): SkillRun[] {
     const runsDir = join(this.skillsDir, slug, 'runs')
     if (!existsSync(runsDir)) return []
