@@ -43,7 +43,7 @@ export class VisionClient {
         authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(120_000),
     })
 
     if (!response.ok) {

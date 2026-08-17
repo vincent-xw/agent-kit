@@ -141,7 +141,7 @@ function createDeviceTools(svc: FlutterToolServices): ToolDefinition[] {
         description: z.string().optional(),
         message: z.string(),
       }),
-      timeoutMs: 30_000,
+      timeoutMs: 130_000,
       async execute(raw) {
         if (!svc.vision) {
           return { ok: false, message: '未配置视觉模型。请设置 VISION_API_KEY、VISION_MODEL 和 VISION_BASE_URL 环境变量。' }

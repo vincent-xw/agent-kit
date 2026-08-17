@@ -66,6 +66,8 @@
   /* Skills 面板 */
   #skills-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
   #skills-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #new-session-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 16px; cursor: pointer; line-height: 1.2; }
+  #new-session-btn:hover { border-color: var(--accent2); color: var(--accent2); }
   #skills-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
   #skills-overlay.open { display: flex; }
   #skills-panel { width: 420px; max-width: 92vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
@@ -113,6 +115,7 @@
   </select>
   <span class="status" id="status">就绪</span>
   <button id="skills-btn" title="Skills">Skills</button>
+  <button id="new-session-btn" title="新建会话">＋</button>
   <button id="settings-btn" title="设置">⚙</button>
 </header>
 
@@ -182,6 +185,13 @@ showToolDetailsEl.addEventListener('change', () => {
   showToolDetails = showToolDetailsEl.checked;
   localStorage.setItem('show_tool_details', showToolDetails ? '1' : '0');
   applyToolDetailSetting();
+});
+
+// ── 新建会话 ──
+document.getElementById('new-session-btn').addEventListener('click', () => {
+  sessionId = 'sess-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  localStorage.setItem('flutter_session_id', sessionId);
+  document.getElementById('messages').innerHTML = '';
 });
 
 // ── Skills ──
