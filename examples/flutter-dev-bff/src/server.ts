@@ -36,6 +36,8 @@ import { createFlutterToolDefinitions } from './flutter-tools.js'
 import { debuggingPrompt, freeFormPrompt, testingPrompt } from './prompts.js'
 import { AdbClient } from './services/adb-client.js'
 import { UiAutomatorDumpProvider } from './services/uiautomator-provider.js'
+import { CompanionProvider } from './services/companion-provider.js'
+import type { SnapshotProvider } from './services/device-provider.js'
 import { FlutterProcessManager } from './services/flutter-process-manager.js'
 import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
@@ -71,7 +73,9 @@ export function createFlutterDevBff(options: {
     : join(programDir, '..', 'public')
 
   const adb = new AdbClient()
-  const device = new UiAutomatorDumpProvider(adb)
+  const device: SnapshotProvider = process.env.COMPANION_ENABLED === '1'
+    ? new CompanionProvider(adb)
+    : new UiAutomatorDumpProvider(adb)
   const webView = new CdpClient(adb)
   const flutter = new FlutterProcessManager({ projectPath: options.flutterProjectPath })
   const screenshots = new ScreenshotStore(screenshotDir)
