@@ -419,13 +419,14 @@ async function runSkill(slug, name) {
 // 工具事件实时流。EventSource 不支持自定义请求头，token 走查询参数。
 // 断线自动重连，重连时浏览器自动带上 Last-Event-ID，服务端据此重放断开期间的事件。
 const toolEls = new Map();
+let currentTypingEl = null;
 
 function connectEvents() {
   const es = new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}`);
 
   es.addEventListener('tool_start', (e) => {
     const data = JSON.parse(e.data);
-    const el = addToolMessage(data.name, '执行中…');
+    const el = addToolMessage(data.name, '执行中…', null, currentTypingEl);
     if (!showToolDetails) el.classList.add('compact');
     toolEls.set(data.name, el);
   });
@@ -441,7 +442,7 @@ function connectEvents() {
         + (detail ? `<div class="tool-output">${escapeHtml(String(detail).slice(0, 500))}</div>` : '');
       toolEls.delete(data.name);
     } else {
-      addToolMessage(data.name, status, detail);
+      addToolMessage(data.name, status, detail, currentTypingEl);
     }
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
@@ -495,7 +496,7 @@ function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function addToolMessage(toolName, status, output) {
+function addToolMessage(toolName, status, output, beforeEl) {
   const div = document.createElement('div');
   div.className = 'msg tool' + (showToolDetails ? '' : ' compact');
   let html = `<div><span class="tool-name">${escapeHtml(toolName)}</span> <span class="tool-status">${escapeHtml(status)}</span></div>`;
@@ -504,7 +505,11 @@ function addToolMessage(toolName, status, output) {
     html += `<div class="tool-output">${escapeHtml(display.slice(0, 500))}${display.length > 500 ? '...' : ''}</div>`;
   }
   div.innerHTML = html;
-  messagesEl.appendChild(div);
+  if (beforeEl) {
+    messagesEl.insertBefore(div, beforeEl);
+  } else {
+    messagesEl.appendChild(div);
+  }
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
 }
@@ -522,6 +527,7 @@ async function sendMessage(text) {
 
   const typingEl = addMessage('assistant', '');
   typingEl.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  currentTypingEl = typingEl;
 
   try {
     const body = {
@@ -573,6 +579,7 @@ async function sendMessage(text) {
     typingEl.className = 'msg assistant error';
     typingEl.textContent = `请求失败: ${err.message}`;
   } finally {
+    currentTypingEl = null;
     running = false;
     stopRequested = false;
     sendBtn.disabled = false;
