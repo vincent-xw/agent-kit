@@ -44,7 +44,7 @@ import { CdpClient } from './services/webview/cdp-client.js'
 import { VisionClient } from './services/vision-client.js'
 import type { VisionClientConfig } from './services/vision-client.js'
 import { SkillStore } from './services/skill-store.js'
-import { generateSkill } from './services/skill-generator.js'
+import { generateSkill, optimizeSkill } from './services/skill-generator.js'
 import type { FlutterEvent } from './services/event-bus.js'
 import { instrumentTools, llmTraceToBus } from './tool-events.js'
 
@@ -221,6 +221,32 @@ export function createFlutterDevBff(options: {
   app.delete('/api/skills/:slug', (c) => {
     skillStore.delete(c.req.param('slug'))
     return c.json({ ok: true })
+  })
+
+  app.post('/api/skills/:slug/optimize', async (c) => {
+    try {
+      const slug = c.req.param('slug')
+      const skill = skillStore.get(slug)
+      if (!skill) return c.json({ error: 'not found' }, 404)
+      const result = await optimizeSkill(skillLlm, toolDefinitions, skill.prompt, skill.runs, skill.meta.version)
+      return c.json(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json({ error: message }, 500)
+    }
+  })
+
+  app.post('/api/skills/:slug/apply', async (c) => {
+    try {
+      const slug = c.req.param('slug')
+      const body = await c.req.json<{ prompt: string; version: string }>()
+      if (!body.prompt) return c.json({ error: 'prompt 不能为空' }, 400)
+      skillStore.updatePrompt(slug, body.prompt, body.version)
+      return c.json({ ok: true })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json({ error: message }, 500)
+    }
   })
 
   app.get('/api/screenshots/:id', (c) => {

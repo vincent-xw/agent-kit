@@ -380,6 +380,7 @@ async function renderSkillDetail(slug) {
       <div style="color:var(--text2);font-size:12px;">${escapeHtml(skill.meta.description || '')}</div>
       <div style="color:var(--text2);font-size:11px;">v${escapeHtml(skill.meta.version)} · ${escapeHtml((skill.meta.tools || []).join(', '))}</div>
       <button class="btn-primary" id="run-skill-btn" style="padding:10px;border:none;border-radius:6px;cursor:pointer;font-weight:600;">▶ 一键执行</button>
+      <button class="btn-secondary" id="optimize-skill-btn" style="padding:6px;border-radius:6px;cursor:pointer;margin-top:6px;align-self:flex-start;">⟳ 优化 Skill</button>
       <div>
         <strong style="font-size:12px;">系统提示词</strong>
         <pre>${escapeHtml(skill.prompt)}</pre>
@@ -392,6 +393,25 @@ async function renderSkillDetail(slug) {
     </div>`;
   document.getElementById('back-to-list').addEventListener('click', renderSkillList);
   document.getElementById('run-skill-btn').addEventListener('click', () => runSkill(slug, skill.meta.name));
+  document.getElementById('optimize-skill-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('optimize-skill-btn');
+    btn.textContent = '优化中…';
+    btn.disabled = true;
+    try {
+      const result = await api(`/api/skills/${encodeURIComponent(slug)}/optimize`, { method: 'POST' });
+      if (!confirm(`优化分析：${result.analysis}\n\n新版本：${result.version}\n\n是否保存新提示词？\n\n${result.prompt.slice(0, 300)}…`)) return;
+      await api(`/api/skills/${encodeURIComponent(slug)}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ prompt: result.prompt, version: result.version }),
+      });
+      renderSkillDetail(slug);
+    } catch (e) {
+      alert('优化失败: ' + e.message);
+    } finally {
+      btn.textContent = '⟳ 优化 Skill';
+      btn.disabled = false;
+    }
+  });
   document.getElementById('delete-skill-btn').addEventListener('click', async () => {
     if (!confirm(`确定删除 Skill「${skill.meta.name}」？`)) return;
     await api(`/api/skills/${encodeURIComponent(slug)}`, { method: 'DELETE' });

@@ -97,6 +97,13 @@ export class SkillStore {
     this.addRun(slug, run)
   }
 
+  updatePrompt(slug: string, prompt: string, version: string): void {
+    const skill = this.get(slug)
+    if (!skill) throw new Error(`Skill 不存在: ${slug}`)
+    const meta = { ...skill.meta, version, updatedAt: new Date().toISOString() }
+    this.save(slug, meta, prompt)
+  }
+
   /** 获取所有 skill 的执行记录，按时间倒序。每条记录附带所属 skill 的 slug。 */
   getAllRuns(): Array<{ slug: string; meta: SkillMeta } & SkillRun> {
     const all: Array<{ slug: string; meta: SkillMeta } & SkillRun> = []

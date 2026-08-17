@@ -23,6 +23,20 @@ const GENERATE_SYSTEM_PROMPT = `你是一个 Agent Skill 设计专家。根据�
 
 只输出 JSON，不要任何额外解释或 markdown 代码块。`
 
+const OPTIMIZE_SYSTEM_PROMPT = `你是一个 Agent Skill 优化专家。根据 Skill 的当前提示词和它的历史执行记录，分析失败原因，改进提示词。
+
+要求：
+1. 分析历史记录中的失败模式和成功模式。
+2. 改进提示词，使其更稳健、更准确。
+3. 保留原有提示词中的有效部分。
+4. 只能使用提供的工具，不要发明不存在的工具。
+5. 输出严格的 JSON，包含两个字段：
+   - analysis: 对历史执行的分析（中文，不超过200字）
+   - prompt: 优化后的完整系统提示词（中文）
+   - version: 新的版本号（在原版本号基础上递增小版本，如 1.0.0 → 1.1.0）
+
+只输出 JSON，不要任何额外解释或 markdown 代码块。`
+
 /**
  * 用 LLM 把用户的大白话描述生成成一个 Skill。
  * 纯生成，不保存，交给用户核验后再存。
@@ -72,4 +86,48 @@ export async function generateSkill(
     meta,
     prompt: parsed.prompt,
   }
+}
+
+export interface OptimizeResult {
+  analysis: string
+  prompt: string
+  version: string
+}
+
+/**
+ * 根据历史执行记录优化 Skill 的提示词。
+ * 读取 runs/ 下的所有记录，把成功/失败模式发给 LLM，生成改进版 prompt。
+ */
+export async function optimizeSkill(
+  llm: LlmClient,
+  tools: ToolDefinition[],
+  currentPrompt: string,
+  runs: Array<{ status: string; summary?: string; error?: string; steps?: number; startedAt: string }>,
+  currentVersion: string,
+): Promise<OptimizeResult> {
+  const toolList = tools.map((t) => `- ${t.name}: ${t.description ?? ''}`).join('\n')
+  const runLog = runs
+    .map((r) => `[${r.startedAt}] ${r.status} ${r.summary ?? ''} ${r.error ?? ''} (${r.steps ?? '?'}步)`)
+    .join('\n')
+
+  const result = await llm.complete({
+    input: `当前提示词：\n---\n${currentPrompt}\n---\n\n历史执行记录：\n${runLog}\n\n当前版本：${currentVersion}\n\n可用工具：\n${toolList}`,
+    context: { platform: 'skill-optimizer' },
+    messages: [],
+    systemPrompt: OPTIMIZE_SYSTEM_PROMPT,
+  })
+
+  if (result.type !== 'final' || typeof result.output !== 'string') {
+    throw new Error('LLM 未返回文本结果')
+  }
+  const text = result.output
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  let parsed: { analysis: string; prompt: string; version: string }
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch (e) {
+    throw new Error(`LLM 返回的不是有效 JSON: ${(e as Error).message}\n原始返回: ${text.slice(0, 300)}`)
+  }
+  if (!parsed.prompt) throw new Error('LLM 返回缺少 prompt 字段')
+  return { analysis: parsed.analysis || '', prompt: parsed.prompt, version: parsed.version || currentVersion }
 }
