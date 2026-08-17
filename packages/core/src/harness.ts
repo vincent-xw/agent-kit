@@ -32,6 +32,11 @@ export interface AgentHarnessDependencies {
   pendingCalls?: PendingCallStore
   /** 服务端工具的默认执行超时毫秒数，默认 30 秒。 */
   toolTimeoutMs?: number
+  /** 工具生命周期回调，用于 SSE 推送等场景。 */
+  toolCallbacks?: {
+    onToolStart?: (event: { callId: string; toolName: string; input: unknown; sessionId: string }) => void
+    onToolEnd?: (event: { callId: string; toolName: string; ok: boolean; outputPreview: unknown; durationMs: number }) => void
+  }
 }
 
 /** 最大步数受限的 模型 -> 工具调用 -> 工具结果 -> 模型 循环。 */
@@ -231,6 +236,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
             toolName: call.toolName,
             ...(promptName ? { promptName } : {}),
           })
+          deps.toolCallbacks?.onToolStart?.({ callId: call.callId, toolName: call.toolName, input: parsedInput, sessionId })
           remoteCalls.push({ callId: call.callId, toolName: call.toolName, input: parsedInput })
           continue
         }
@@ -337,6 +343,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       )
     },
     async resume(request) {
+      const resumedAt = Date.now()
       const pending = await pendingCalls.get(request.callId)
       if (!pending || pending.sessionId !== request.sessionId) {
         throw new AgentKitError('PENDING_CALL_NOT_FOUND', `未找到可回填的工具调用：${request.callId}`)
@@ -358,6 +365,13 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
       }
 
       await pendingCalls.delete(request.callId)
+      deps.toolCallbacks?.onToolEnd?.({
+        callId: request.callId,
+        toolName: pending.toolName,
+        ok: !('ok' in (parsedOutput as Record<string, unknown>) && (parsedOutput as Record<string, unknown>).ok === false),
+        outputPreview: parsedOutput,
+        durationMs: Date.now() - resumedAt,
+      })
       const history: SessionMessage[] = [
         ...(await deps.sessions.load(request.sessionId)),
         { role: 'tool', content: parsedOutput, callId: request.callId, toolName: pending.toolName },
