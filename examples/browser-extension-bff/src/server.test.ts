@@ -142,7 +142,9 @@ describe('browser-extension-bff 运行协议', () => {
       headers: { 'content-type': 'application/json', authorization: 'Bearer token-1' },
       body: JSON.stringify({ output: { found: 'yes' } }),
     })
-    await expect(response.json()).resolves.toMatchObject({ code: 'TOOL_OUTPUT_INVALID' })
+    // 输出校验失败后，harness 把错误作为工具结果喂回模型，让 LLM 重试
+    const result = await response.json() as { type: string }
+    expect(result.type).toBe('pending_tool_calls')
     database.close()
   })
 
