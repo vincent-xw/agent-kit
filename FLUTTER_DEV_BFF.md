@@ -31,47 +31,80 @@
 
 ---
 
-## 当前进度（Phase 1-3 已完成）
+## 当前进度（Phase 1-5 已完成）
 
 ### 已实现的文件
 
 ```
 examples/flutter-dev-bff/
-├── package.json              # workspace 包，依赖 @agent-kit/*
-├── tsconfig.json             # 继承 monorepo 严格配置
-├── build.mjs                 # esbuild 打包（复用 browser example 模式）
+├── package.json
+├── tsconfig.json
+├── build.mjs
+├── .env.example
+├── README.md
 ├── public/
-│   └── index.html            # 单文件聊天 Web UI（无框架无构建）
-└── src/
-    ├── server.ts             # BFF 装配 + 启动 + .env + Web 路由 + 优雅关闭
-    ├── server.test.ts        # 鉴权/密钥/工具执行集成测试
-    ├── flutter-tools.ts      # 21 个工具定义（工厂函数）
-    ├── flutter-tools.test.ts # 工具 schema/结构测试
-    ├── prompts.ts            # free-form / debugging / testing 三个 prompt
-    ├── types.ts              # 共享类型
-    └── services/
-        ├── adb-client.ts           # adb CLI 封装
-        ├── device-provider.ts      # SnapshotProvider 接口
-        ├── uiautomator-provider.ts # uiautomator dump 实现 + XML 解析
-        ├── uiautomator-provider.test.ts
-        ├── flutter-process-manager.ts  # flutter run 长进程 + 日志环形缓冲
-        ├── vm-service-client.ts     # Dart VM Service WebSocket 客户端
-        └── screenshot-store.ts      # 截图文件存储 + PNG 尺寸解析
+│   └── index.html            # 单文件聊天 Web UI（设置、Skills、历史、新建会话）
+├── scripts/
+│   ├── ime-setup.sh          # ADBKeyBoard 安装与启用脚本
+│   └── ime-restore.sh        # 还原原输入法
+├── skills/                   # Skill 目录（可创建多个 skill）
+├── src/
+│   ├── server.ts             # BFF 装配 + 启动 + 路由 + 优雅关闭
+│   ├── server.test.ts
+│   ├── flutter-tools.ts      # 25 个工具定义（工厂函数）
+│   ├── flutter-tools.test.ts
+│   ├── prompts.ts            # 三个系统提示词
+│   ├── types.ts
+│   ├── tool-events.ts        # 工具埋点 + SSE 事件
+│   ├── tool-events.test.ts
+│   └── services/
+│       ├── adb-client.ts
+│       ├── adb-client.test.ts
+│       ├── companion-provider.ts  # Companion App 模式提供者
+│       ├── device-provider.ts     # SnapshotProvider 接口
+│       ├── event-bus.ts           # SSE 事件总线
+│       ├── event-bus.test.ts
+│       ├── flutter-process-manager.ts
+│       ├── screenshot-store.ts
+│       ├── skill-store.ts         # Skill 文件系统存储
+│       ├── skill-generator.ts     # LLM 生成/优化 Skill
+│       ├── uiautomator-provider.ts
+│       ├── uiautomator-provider.test.ts
+│       ├── vision-client.ts       # 视觉模型客户端
+│       ├── vision-client.test.ts
+│       ├── vm-service-client.ts
+│       └── webview/
+│           ├── cdp-client.ts       # CDP 发现/连接/DOM 抓取
+│           ├── cdp-client.test.ts
+│           ├── dom-to-nodes.ts     # DOM → DeviceNode 转换
+│           └── dom-to-nodes.test.ts
+├── companion-android/          # 独立 Kotlin/Android 项目
+│   ├── build.gradle.kts
+│   ├── settings.gradle.kts
+│   └── app/src/main/java/com/agentkit/companion/
+│       ├── CompanionAccessibilityService.kt
+│       ├── CompanionHttpServer.kt
+│       ├── NodeTreeDumper.kt
+│       └── MainActivity.kt
 ```
 
-### 已实现的 21 个工具
+### 已实现的 25 个工具
 
 **设备/应用管理（5）：** `mobile_devices`、`mobile_app_install`、`mobile_app_launch`、`mobile_app_stop`、`mobile_screenshot`
 
-**无障碍交互（6）：** `mobile_snapshot`（工具列表第一个）、`mobile_tap_node`、`mobile_set_text`、`mobile_scroll_node`、`mobile_wait_for`、`mobile_press_key`
+**无障碍交互（6）：** `mobile_snapshot`、`mobile_tap_node`、`mobile_set_text`、`mobile_scroll_node`、`mobile_wait_for`、`mobile_press_key`
 
 **坐标降级（2）：** `mobile_tap`、`mobile_swipe`
 
-**Flutter 开发（8）：** `flutter_run_start`、`flutter_run_stop`、`flutter_hot_reload`、`flutter_hot_restart`、`flutter_logs`、`flutter_analyze`、`flutter_test`、`flutter_eval`
+**视觉分析（1）：** `mobile_screen_analyze`
+
+**网页（WebView/CDP，4）：** `web_snapshot`、`web_tap`、`web_set_text`、`web_scroll`
+
+**Flutter 开发（7）：** `flutter_run_start`、`flutter_run_stop`、`flutter_hot_reload`、`flutter_hot_restart`、`flutter_logs`、`flutter_analyze`、`flutter_test`、`flutter_eval`
 
 ### 测试状态
 
-- **19 个测试全部通过**
+- **88+ 个测试通过**（flutter-dev-bff 88 + core/bff-hono/adapter 等）
 - 全 monorepo `pnpm -r build` 通过
 - 工具 schema 全部可转 JSON Schema
 - 鉴权、密钥加密存储、server 工具进程内执行均已验证
@@ -80,45 +113,21 @@ examples/flutter-dev-bff/
 
 ## 待完成
 
-### Phase 3 收尾（优先级高）
+### Phase 6：双 LLM 视觉识图（已完成）
 
-1. **EventBus + SSE 实时进度** — `event-bus.ts` 骨架已写（但在重构中移除了，需要重新加回）。需要：
-   - 在工具 execute 外包一层发送 `tool_start`/`tool_end` 事件
-   - 添加 SSE 端点 `/api/events/:sessionId`
-   - Web UI 接入 EventSource 实时显示工具调用状态
-   - 注意：这不能通过修改 agent-kit core 实现，需要在 BFF 层包装
+`mobile_screen_analyze` 工具已完成，截图送本地多模态模型返回文字描述。
+配置见 README.md 的视觉模型配置章节。
 
-2. **服务层单元测试** — AdbClient、FlutterProcessManager、VmServiceClient 的 mock 测试
-3. **.env.example 文件**
-4. **README.md** — 启动说明、工具列表、架构说明
-5. **真机端到端验证**
+### Phase 7：Skill 系统（已完成）
 
-### Phase 4：Android Companion App（优先级中）
+大白话 → LLM 生成 Skill prompt → 用户核验 → 保存 → 一键执行。
+支持 Skill 自优化（读历史 → LLM 分析 → 生成新版 prompt）。
+Skills 面板含「Skills」「历史」两个标签页。
 
-新建 `companion-android/` 子目录（独立 Gradle/Kotlin 项目）：
+### 已知问题
 
-- `CompanionAccessibilityService` — 继承 AccessibilityService，持有节点树引用和事件环形缓冲（200 条）
-- `NodeTreeDumper` — 递归遍历 `rootInActiveWindow`，输出扁平节点 JSON
-- `CompanionHttpServer` — 基于 NanoHTTPD，绑定 `127.0.0.1:7777`
-- `MainActivity` — 引导用户开启无障碍权限 + 服务状态显示
-
-**HTTP API：**
-- `GET /tree` → 无障碍树 JSON
-- `POST /node/:id/click` → `performAction(ACTION_CLICK)`
-- `POST /node/:id/text` → `ACTION_SET_TEXT`（支持 Unicode）
-- `POST /node/:id/scroll` → `ACTION_SCROLL_FORWARD/BACKWARD`
-- `GET /events?since=<ts>` → 无障碍事件流
-
-BFF 侧实现 `CompanionProvider`（实现 `SnapshotProvider` 接口），通过 `COMPANION_ENABLED` 环境变量切换。
-
-**调研结论：** 现有方案中 atx-agent 已归档（2024.5），appium-uiautomator2-server 与 Appium 耦合重。自定义 Kotlin App 开发量约 2-3 天，API 精简可控。
-
-### Phase 5：WebView CDP（优先级低）
-
-Flutter App 内 WebView 的自动化：
-- `adb shell cat /proc/net/unix | grep webview_devtools_remote` 发现 WebView
-- `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`
-- CDP WebSocket 连接，复用 browser-extension-bff 的 CDP 工具逻辑
+- `browser-extension-bff` 有 1 个测试失败（工具输出 Schema 校验），是 main 上预先存在的问题
+- Flutter 开发期工具（run/reload/eval/analyze/test）只对 Flutter 项目有效，不适用于通用 App 调试
 
 ---
 
