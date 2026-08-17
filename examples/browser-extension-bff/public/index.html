@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Browser AI Assistant</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root { --bg: #1a1a2e; --surface: #16213e; --surface2: #1e2a4a; --text: #e0e0e0; --text2: #a0a0b0; --accent: #4f8cff; --accent2: #6ba3ff; --success: #4caf50; --error: #f44336; --border: #2a2a4a; --radius: 8px; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; font-size: 13px; line-height: 1.5; }
+#app { display: flex; flex-direction: column; height: 100vh; max-width: 100%; }
+header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+header h1 { font-size: 14px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header button { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: var(--radius); cursor: pointer; font-size: 12px; white-space: nowrap; }
+header button:hover { background: var(--accent); }
+#messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 100%; padding: 8px 12px; border-radius: var(--radius); word-wrap: break-word; }
+.msg.user { background: var(--surface2); align-self: flex-end; border-bottom-right-radius: 2px; }
+.msg.assistant { background: var(--surface); align-self: flex-start; border-bottom-left-radius: 2px; }
+.msg.error { background: #3a1a1a; border-left: 3px solid var(--error); }
+.msg .text { white-space: pre-wrap; }
+.msg .text p { margin: 4px 0; }
+.msg .text code { background: #2a2a4a; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.msg .text pre { background: #2a2a4a; padding: 8px; border-radius: var(--radius); overflow-x: auto; margin: 8px 0; font-size: 12px; }
+.tool-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); margin: 4px 0; font-size: 12px; }
+.tool-card .header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; }
+.tool-card .header .name { font-weight: 600; flex: 1; }
+.tool-card .header .status { font-size: 11px; }
+.tool-card .header .status.ok { color: var(--success); }
+.tool-card .header .status.fail { color: var(--error); }
+.tool-card .header .status.running { color: var(--accent); }
+.tool-card .header .time { color: var(--text2); font-size: 11px; }
+.tool-card .body { padding: 6px 10px 10px; border-top: 1px solid var(--border); }
+.tool-card .body pre { background: #2a2a4a; padding: 6px; border-radius: 4px; overflow-x: auto; font-size: 11px; margin: 4px 0; max-height: 200px; overflow-y: auto; }
+#input-area { display: flex; gap: 8px; padding: 8px 12px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+#input-area textarea { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px; border-radius: var(--radius); resize: none; font-family: inherit; font-size: 13px; min-height: 36px; max-height: 120px; }
+#input-area textarea:focus { outline: none; border-color: var(--accent); }
+#input-area button { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; font-size: 13px; font-weight: 500; }
+#input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+#input-area button#stop { background: var(--error); }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.status-dot.online { background: var(--success); }
+.status-dot.offline { background: var(--error); }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.overlay-content { background: var(--surface); padding: 20px; border-radius: var(--radius); min-width: 260px; max-width: 90%; }
+.overlay-content h3 { margin-bottom: 12px; font-size: 15px; }
+.overlay-content label { display: block; margin: 10px 0; }
+.overlay-content input { width: 100%; padding: 6px 8px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 4px; margin-top: 4px; box-sizing: border-box; }
+.overlay-content button { margin-top: 12px; background: var(--accent); color: #fff; border: none; padding: 6px 16px; border-radius: var(--radius); cursor: pointer; }
+#prompt-selector { padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+#prompt-selector select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); padding: 3px 6px; border-radius: 4px; font-size: 12px; width: 100%; }
+#step-indicator { padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); font-size: 11px; color: var(--text2); text-align: center; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Browser AI</h1>
+    <span class="status-dot offline" id="status-dot"></span>
+    <span id="status-text" style="font-size:11px;color:var(--text2)">离线</span>
+    <button id="new-btn">新建</button>
+    <button id="settings-btn">设置</button>
+  </header>
+  <div id="messages"></div>
+  <div id="step-indicator" style="display:none"></div>
+  <div id="prompt-selector">
+    <select id="prompt-name">
+      <option value="free-form">自由指令</option>
+      <option value="planning">规划</option>
+      <option value="browser-automation">浏览器自动化</option>
+      <option value="candidate-assessment">评估</option>
+    </select>
+  </div>
+  <div id="input-area">
+    <textarea id="input" placeholder="描述你想做的事..." rows="2"></textarea>
+    <button id="send-btn">发送</button>
+    <button id="stop-btn" style="display:none">停止</button>
+  </div>
+</div>
+<div id="settings-overlay" class="overlay" style="display:none">
+  <div class="overlay-content">
+    <h3>设置</h3>
+    <label>BFF Token <input id="token-input" type="password" placeholder="dev-token"></label>
+    <button id="settings-save">保存</button>
+  </div>
+</div>
+<script>
+(function() {
+  const SESSION_KEY = 'bff-session-id'
+  const TOKEN_KEY = 'bff-token'
+  let sessionId = localStorage.getItem(SESSION_KEY) || crypto.randomUUID()
+  let token = new URLSearchParams(location.search).get('token') || localStorage.getItem(TOKEN_KEY) || ''
+  let eventSource = null
+  let abortController = null
+  let running = false
+  let currentPrompt = 'free-form'
+
+  localStorage.setItem(SESSION_KEY, sessionId)
+
+  const $ = (s) => document.querySelector(s)
+  const msgEl = () => $('#messages')
+  const inputEl = () => $('#input')
+  const sendBtn = () => $('#send-btn')
+  const stopBtn = () => $('#stop-btn')
+  const stepEl = () => $('#step-indicator')
+
+  function appendMessage(role, text) {
+    const div = document.createElement('div')
+    div.className = 'msg ' + role
+    const textDiv = document.createElement('div')
+    textDiv.className = 'text'
+    textDiv.textContent = text
+    div.appendChild(textDiv)
+    msgEl().appendChild(div)
+    msgEl().scrollTop = msgEl().scrollHeight
+    return div
+  }
+
+  function addToolCard(callId, toolName, input) {
+    const card = document.createElement('div')
+    card.className = 'tool-card'
+    card.dataset.callId = callId
+    card.innerHTML = '<div class="header"><span class="name">' + toolName + '</span><span class="status running">运行中</span></div><div class="body" style="display:none"><pre class="tool-input">' + JSON.stringify(input, null, 2) + '</pre><pre class="tool-output"></pre></div>'
+    card.querySelector('.header').addEventListener('click', () => {
+      const body = card.querySelector('.body')
+      body.style.display = body.style.display === 'none' ? 'block' : 'none'
+    })
+    msgEl().appendChild(card)
+    msgEl().scrollTop = msgEl().scrollHeight
+    return card
+  }
+
+  function updateToolCard(callId, ok, output, durationMs) {
+    const card = msgEl().querySelector('[data-call-id="' + callId + '"]')
+    if (!card) return
+    const status = card.querySelector('.status')
+    status.className = 'status ' + (ok ? 'ok' : 'fail')
+    status.textContent = ok ? '成功 (' + durationMs + 'ms)' : '失败 (' + durationMs + 'ms)'
+    const outputEl = card.querySelector('.tool-output')
+    if (outputEl) outputEl.textContent = typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+  }
+
+  function setExecutorStatus(online) {
+    const dot = $('#status-dot')
+    const text = $('#status-text')
+    dot.className = 'status-dot ' + (online ? 'online' : 'offline')
+    text.textContent = online ? '在线' : '离线'
+  }
+
+  function setStep(index, total) {
+    const el = stepEl()
+    el.style.display = 'block'
+    el.textContent = '第 ' + index + ' / ' + total + ' 步'
+  }
+
+  function hideStep() {
+    stepEl().style.display = 'none'
+  }
+
+  function connectSSE() {
+    if (eventSource) eventSource.close()
+    if (!token) return
+    const url = '/api/events?token=' + encodeURIComponent(token) + '&sessionId=' + encodeURIComponent(sessionId)
+    eventSource = new EventSource(url)
+    eventSource.addEventListener('tool_start', (e) => {
+      try { const d = JSON.parse(e.data); addToolCard(d.callId, d.toolName, d.input) } catch {}
+    })
+    eventSource.addEventListener('tool_end', (e) => {
+      try { const d = JSON.parse(e.data); updateToolCard(d.callId, d.ok, d.outputPreview, d.durationMs) } catch {}
+    })
+    eventSource.addEventListener('step', (e) => {
+      try { const d = JSON.parse(e.data); setStep(d.index, d.total) } catch {}
+    })
+    eventSource.addEventListener('done', (e) => {
+      hideStep()
+      running = false
+      sendBtn().style.display = ''
+      stopBtn().style.display = 'none'
+      sendBtn().disabled = false
+      inputEl().disabled = false
+    })
+    eventSource.addEventListener('error', () => {})
+    eventSource.addEventListener('executor_status', (e) => {
+      try { const d = JSON.parse(e.data); setExecutorStatus(d.online) } catch {}
+    })
+  }
+
+  async function sendMessage() {
+    const text = inputEl().value.trim()
+    if (!text || running) return
+    inputEl().value = ''
+    running = true
+    sendBtn().style.display = 'none'
+    stopBtn().style.display = ''
+    sendBtn().disabled = true
+    inputEl().disabled = true
+    abortController = new AbortController()
+    appendMessage('user', text)
+    setExecutorStatus(false)
+    try {
+      const response = await fetch('/v1/agent/sessions/' + encodeURIComponent(sessionId) + '/run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + token },
+        body: JSON.stringify({ input: text, context: { currentDate: new Date().toISOString() }, stepMode: true, promptName: currentPrompt }),
+        signal: abortController.signal,
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        appendMessage('error', 'BFF 错误: ' + (result.message || response.statusText))
+        running = false
+        sendBtn().style.display = ''
+        stopBtn().style.display = 'none'
+        sendBtn().disabled = false
+        inputEl().disabled = false
+        return
+      }
+      if (result.output) {
+        appendMessage('assistant', typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2))
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return
+      appendMessage('error', '请求失败: ' + err.message)
+    }
+    running = false
+    sendBtn().style.display = ''
+    stopBtn().style.display = 'none'
+    sendBtn().disabled = false
+    inputEl().disabled = false
+  }
+
+  function stopMessage() {
+    abortController?.abort()
+    running = false
+    sendBtn().style.display = ''
+    stopBtn().style.display = 'none'
+    sendBtn().disabled = false
+    inputEl().disabled = false
+  }
+
+  function newSession() {
+    sessionId = crypto.randomUUID()
+    localStorage.setItem(SESSION_KEY, sessionId)
+    msgEl().innerHTML = ''
+    hideStep()
+    connectSSE()
+  }
+
+  $('#send-btn').addEventListener('click', sendMessage)
+  $('#stop-btn').addEventListener('click', stopMessage)
+  $('#new-btn').addEventListener('click', newSession)
+  $('#settings-btn').addEventListener('click', () => {
+    $('#token-input').value = token
+    $('#settings-overlay').style.display = ''
+  })
+  $('#settings-save').addEventListener('click', () => {
+    token = $('#token-input').value
+    localStorage.setItem(TOKEN_KEY, token)
+    $('#settings-overlay').style.display = 'none'
+    connectSSE()
+  })
+  $('#settings-overlay').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) $('#settings-overlay').style.display = 'none'
+  })
+  inputEl().addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+  })
+  $('#prompt-name').addEventListener('change', (e) => { currentPrompt = e.target.value })
+
+  connectSSE()
+  setExecutorStatus(false)
+})()
+</script>
+</body>
+</html>
