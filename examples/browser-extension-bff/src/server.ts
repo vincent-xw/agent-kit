@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFileSync, existsSync, writeFileSync, createReadStream } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
@@ -419,9 +419,26 @@ async function seedSecret(runtime: { secrets: { put(secret: LlmSecret): Promise<
 
 export function startServer(options: { masterKey: string; apiToken: string; port?: number; llm?: LlmSecret; llmMaxRetries?: number; llmTrace?: (event: LlmTraceEvent) => void; databasePath?: string }) {
   const { app, ready, wsExecutor } = createBrowserExtensionBff(options)
-  let publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
-  if (!existsSync(publicDir)) {
-    publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public')
+  // Vite 构建产物目录：dist-web/（相对于编译后的 dist/server.js 是 ../dist-web）
+  let webDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist-web')
+  if (!existsSync(webDir)) {
+    // 开发模式（tsx 直接跑 src/server.ts）：dist-web 在项目根
+    webDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist-web')
+  }
+
+  const mimeTypes: Record<string, string> = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.map': 'application/json',
   }
 
   const wss = new WebSocketServer({ noServer: true })
@@ -430,13 +447,28 @@ export function startServer(options: { masterKey: string; apiToken: string; port
     await ready
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
 
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    // 静态资源（/assets/* 等 Vite 产出的带 hash 文件）
+    if (req.method === 'GET' && url.pathname.startsWith('/assets/')) {
       try {
-        const content = readFileSync(join(publicDir, 'index.html'), 'utf-8')
+        const filePath = join(webDir, url.pathname)
+        const ext = extname(filePath)
+        res.writeHead(200, { 'content-type': mimeTypes[ext] || 'application/octet-stream' })
+        createReadStream(filePath).pipe(res)
+        return
+      } catch {
+        res.writeHead(404); res.end('Not Found'); return
+      }
+    }
+
+    // 根路径和 SPA fallback：返回 index.html
+    if (req.method === 'GET' && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/v1/')) {
+      try {
+        const content = readFileSync(join(webDir, 'index.html'), 'utf-8')
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
         res.end(content)
       } catch {
-        res.writeHead(404); res.end('Not Found')
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('Web UI not built. Run `pnpm --dir web build` first.')
       }
       return
     }

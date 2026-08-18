@@ -14,7 +14,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prestart": "pnpm --filter @agent-kit/core --filter @agent-kit/bff-hono --filter @agent-kit/adapter-sqlite --filter browser-extension-bff build",
+    "build:web": "pnpm --dir web build",
+    "build:all": "pnpm build && pnpm build:web",
+    "prestart": "pnpm --filter @agent-kit/core --filter @agent-kit/bff-hono --filter @agent-kit/adapter-sqlite --filter browser-extension-bff build && pnpm build:web",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "predev": "pnpm --filter @agent-kit/core --filter @agent-kit/bff-hono --filter @agent-kit/adapter-sqlite build",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput & node --watch --env-file-if-exists=.env dist/server.js",
