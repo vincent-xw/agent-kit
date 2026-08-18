@@ -1,6 +1,12 @@
 import { AgentKitError } from './errors.js'
 import type { LlmResult, SessionMessage, ToolCall, ToolSchema } from './contracts.js'
 
+/** 流式增量回调的载荷。 */
+export interface LlmDelta {
+  content?: string
+  reasoning?: string
+}
+
 /** LlmClient 配置：密钥、Base URL 与模型名来自受信任来源。 */
 export interface LlmClientConfig {
   apiKey: string
@@ -16,6 +22,11 @@ export interface LlmClientConfig {
    * 生产环境不应开启。
    */
   trace?: (event: LlmTraceEvent) => void
+  /**
+   * 流式回调。提供时使用 stream:true 调用端点，每收到文本/reasoning 增量时回调。
+   * 最终结果仍通过 complete() 返回值交付，回调仅用于实时展示。
+   */
+  onDelta?: (delta: LlmDelta) => void
 }
 
 /** 一次 LLM 调用的跟踪事件。 */
@@ -175,11 +186,6 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
   const maxRetries = Math.max(0, Math.min(5, config.maxRetries ?? 3))
   const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`
   const trace = config.trace
-  /** 判断错误是否值得重试：网络失败与 5xx/429 重试，4xx 不重试。 */
-  function isRetryable(status: number | undefined): boolean {
-    if (status === undefined) return true // 网络层失败，没有 HTTP 状态码
-    return status >= 500 || status === 429
-  }
 
   return {
     async complete(request) {
@@ -192,64 +198,261 @@ export function createLlmClient(config: LlmClientConfig): LlmClient {
           ? { tools: request.tools.map((tool) => ({ type: 'function', function: tool })) }
           : {}),
         ...(request.responseFormatJson ? { response_format: { type: 'json_object' } } : {}),
+        ...(config.onDelta ? { stream: true } : {}),
       }
       trace?.({ requestId, phase: 'request', body, durationMs: 0 })
 
-      let lastError: AgentKitError | null = null
-      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        const startedAt = Date.now()
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), timeoutMs)
-        try {
-          let response: { ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }
-          try {
-            response = await fetch(endpoint, {
-              method: 'POST',
-              headers: {
-                'content-type': 'application/json',
-                authorization: `Bearer ${config.apiKey}`,
-              },
-              body: JSON.stringify(body),
-              signal: controller.signal,
-            })
-          } catch (error) {
-            trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, error })
-            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
-            if (attempt < maxRetries) continue
-            throw lastError
-          }
-          if (!response.ok) {
-            const detail = await readErrorDetail(response)
-            trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, responseBody: { status: response.status, detail } })
-            lastError = new AgentKitError(
-              'LLM_RESPONSE_INVALID',
-              `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`,
-            )
-            // 4xx（参数错误、模型不存在等）重试也是同样结果，直接抛出。
-            if (!isRetryable(response.status) || attempt >= maxRetries) throw lastError
-            continue
-          }
-          let payload: unknown
-          try {
-            payload = await response.json()
-          } catch {
-            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应不是有效 JSON')
-            if (attempt < maxRetries) continue
-            throw lastError
-          }
-          trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
-          const result = extractResult(payload)
-          if (!result) {
-            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
-            if (attempt < maxRetries) continue
-            throw lastError
-          }
-          return result
-        } finally {
-          clearTimeout(timer)
-        }
+      if (config.onDelta) {
+        return completeStream(endpoint, config, body, requestId, trace, request, timeoutMs, maxRetries)
       }
-      throw lastError ?? new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败（重试耗尽）')
+      return completeJson(endpoint, config, body, requestId, trace, timeoutMs, maxRetries)
     },
   }
+}
+
+async function completeJson(
+  endpoint: string,
+  config: LlmClientConfig,
+  body: Record<string, unknown>,
+  requestId: string,
+  trace: ((event: LlmTraceEvent) => void) | undefined,
+  timeoutMs: number,
+  maxRetries: number,
+): Promise<LlmResult> {
+  let lastError: AgentKitError | null = null
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const startedAt = Date.now()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      let response: { ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${config.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+      } catch (error) {
+        trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, error })
+        lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
+        if (attempt < maxRetries) continue
+        throw lastError
+      }
+      if (!response.ok) {
+        const detail = await readErrorDetail(response)
+        trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, responseBody: { status: response.status, detail } })
+        lastError = new AgentKitError(
+          'LLM_RESPONSE_INVALID',
+          `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`,
+        )
+        if (!isRetryableStatus(response.status) || attempt >= maxRetries) throw lastError
+        continue
+      }
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch {
+        lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应不是有效 JSON')
+        if (attempt < maxRetries) continue
+        throw lastError
+      }
+      trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+      const result = extractResult(payload)
+      if (!result) {
+        lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
+        if (attempt < maxRetries) continue
+        throw lastError
+      }
+      return result
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  throw lastError ?? new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败（重试耗尽）')
+}
+
+interface StreamAccumulator {
+  content: string
+  reasoning: string
+  toolCalls: Map<number, { id: string; name: string; arguments: string }>
+  finishReason: string | null
+}
+
+async function completeStream(
+  endpoint: string,
+  config: LlmClientConfig,
+  body: Record<string, unknown>,
+  requestId: string,
+  trace: ((event: LlmTraceEvent) => void) | undefined,
+  _request: LlmClientRequest,
+  timeoutMs: number,
+  maxRetries: number,
+): Promise<LlmResult> {
+  const onDelta = config.onDelta!
+  let lastError: AgentKitError | null = null
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const startedAt = Date.now()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      let response: Response
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${config.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+      } catch (error) {
+        trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, error })
+        lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败', { cause: error })
+        if (attempt < maxRetries) continue
+        throw lastError
+      }
+
+      if (!response.ok) {
+        const detail = await readErrorDetail(response)
+        trace?.({ requestId, phase: 'error', durationMs: Date.now() - startedAt, responseBody: { status: response.status, detail } })
+        lastError = new AgentKitError('LLM_RESPONSE_INVALID', `LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ''}`)
+        if (!isRetryableStatus(response.status) || attempt >= maxRetries) throw lastError
+        continue
+      }
+
+      if (!response.body) {
+        lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 流式响应没有 body')
+        if (attempt < maxRetries) continue
+        throw lastError
+      }
+
+      const acc: StreamAccumulator = { content: '', reasoning: '', toolCalls: new Map(), finishReason: null }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith('data:')) continue
+            const data = trimmed.slice(5).trim()
+            if (data === '[DONE]') continue
+            let chunk: unknown
+            try {
+              chunk = JSON.parse(data)
+            } catch {
+              continue
+            }
+            processStreamChunk(chunk as StreamChunk, acc, onDelta)
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+
+      trace?.({
+        requestId,
+        phase: 'response',
+        responseBody: { content_length: acc.content.length, tool_calls: acc.toolCalls.size, finish_reason: acc.finishReason },
+        durationMs: Date.now() - startedAt,
+      })
+
+      return assembleStreamResult(acc)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  throw lastError ?? new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 请求失败（重试耗尽）')
+}
+
+interface StreamChunk {
+  choices?: Array<{
+    delta?: {
+      content?: string
+      reasoning_content?: string
+      tool_calls?: Array<{
+        index: number
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+    finish_reason?: string | null
+  }>
+}
+
+function processStreamChunk(
+  chunk: StreamChunk,
+  acc: StreamAccumulator,
+  onDelta: (delta: { content?: string; reasoning?: string }) => void,
+): void {
+  const choice = chunk.choices?.[0]
+  if (!choice) return
+  if (choice.finish_reason) acc.finishReason = choice.finish_reason
+
+  const delta = choice.delta
+  if (!delta) return
+
+  if (delta.reasoning_content) {
+    acc.reasoning += delta.reasoning_content
+    onDelta({ reasoning: delta.reasoning_content })
+  }
+  if (delta.content) {
+    acc.content += delta.content
+    onDelta({ content: delta.content })
+  }
+  if (Array.isArray(delta.tool_calls)) {
+    for (const tc of delta.tool_calls) {
+      const existing = acc.toolCalls.get(tc.index) ?? { id: '', name: '', arguments: '' }
+      if (tc.id) existing.id = tc.id
+      if (tc.function?.name) existing.name = tc.function.name
+      if (tc.function?.arguments) existing.arguments += tc.function.arguments
+      acc.toolCalls.set(tc.index, existing)
+    }
+  }
+}
+
+function assembleStreamResult(acc: StreamAccumulator): LlmResult {
+  if (acc.toolCalls.size > 0) {
+    const calls: ToolCall[] = []
+    for (const [index, tc] of acc.toolCalls) {
+      let input: unknown = {}
+      if (tc.arguments.trim()) {
+        try {
+          input = JSON.parse(tc.arguments)
+        } catch {
+          input = {}
+        }
+      }
+      calls.push({ callId: tc.id || `call-${index}`, toolName: tc.name, input })
+    }
+    return {
+      type: 'tool_calls',
+      calls,
+      ...(acc.reasoning ? { reasoning: acc.reasoning } : {}),
+    }
+  }
+  return {
+    type: 'final',
+    output: acc.content,
+    ...(acc.reasoning ? { reasoning: acc.reasoning } : {}),
+  }
+}
+
+function isRetryableStatus(status: number | undefined): boolean {
+  if (status === undefined) return true
+  return status >= 500 || status === 429
 }

@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { DatabaseSync } from 'node:sqlite'
 
 import { AgentKitError, createAgentHarness, createLlmClient, createToolRegistry } from '@agent-kit/core'
-import type { AuditLogger, LlmSecret, LlmTraceEvent, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
+import type { AuditLogger, LlmDelta, LlmSecret, LlmTraceEvent, PendingCall, PendingCallStore, PromptRegistry, SessionMessage } from '@agent-kit/core'
 
 /** 由主密钥派生短密钥版本标识，轮换后旧密文无法通过版本校验。 */
 function deriveKeyVersion(masterKey: string): string {
@@ -122,6 +122,8 @@ export function createSqliteAgentRuntime(options: {
   audit?: AuditLogger
   /** LLM 调用级追踪，供 verbose 日志使用。见 createLlmVerboseLogger。 */
   llmTrace?: (event: LlmTraceEvent) => void
+  /** LLM 流式增量回调，提供时启用 stream:true。 */
+  llmDelta?: (delta: LlmDelta) => void
   /** LLM 最大重试次数，透传给 createLlmClient。 */
   llmMaxRetries?: number
 }) {
@@ -134,7 +136,12 @@ export function createSqliteAgentRuntime(options: {
     llm: {
       complete: async (request) => {
         const secret = await secrets.get()
-        return createLlmClient({ ...secret, ...(options.llmTrace ? { trace: options.llmTrace } : {}), ...(options.llmMaxRetries !== undefined ? { maxRetries: options.llmMaxRetries } : {}) }).complete(request)
+        return createLlmClient({
+          ...secret,
+          ...(options.llmTrace ? { trace: options.llmTrace } : {}),
+          ...(options.llmDelta ? { onDelta: options.llmDelta } : {}),
+          ...(options.llmMaxRetries !== undefined ? { maxRetries: options.llmMaxRetries } : {}),
+        }).complete(request)
       },
     },
     sessions,
