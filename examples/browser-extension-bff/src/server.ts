@@ -1,5 +1,5 @@
-import { createServer } from 'node:http'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { serve } from '@hono/node-server'
+import { streamSSE } from 'hono/streaming'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -12,15 +12,12 @@ import { fileURLToPath } from 'node:url'
  * 所以不能用 __filename 的目录，必须用 exe 自身所在目录。
  */
 function getProgramDir(): string {
-  // pkg 运行时会注入 process.pkg，跨平台判断，不依赖路径前缀。
   if ((process as { pkg?: unknown }).pkg !== undefined) {
     return dirname(process.execPath)
   }
-  // CJS bundle 里有 __filename
   if (typeof __filename !== 'undefined') {
     return dirname(__filename)
   }
-  // ESM 模式
   try {
     if (typeof import.meta !== 'undefined' && import.meta.url) {
       return dirname(fileURLToPath(import.meta.url))
@@ -33,7 +30,7 @@ function getProgramDir(): string {
 
 import { createSqliteAgentRuntime } from '@agent-kit/adapter-sqlite'
 import { createAgentBff } from '@agent-kit/bff-hono'
-import { createConsoleAuditLogger, createLlmVerboseLogger, createPromptRegistry } from '@agent-kit/core'
+import { AgentKitError, createConsoleAuditLogger, createLlmVerboseLogger, createPromptRegistry } from '@agent-kit/core'
 import type { AuditLogger, LlmSecret, LlmTraceEvent } from '@agent-kit/core'
 
 import {
@@ -45,27 +42,24 @@ import {
   planningPrompt,
   planningProtocol,
 } from './browser-tools.js'
+import { createEventBus } from './event-bus.js'
+import type { BffEvent } from './event-bus.js'
+import { llmTraceToBus } from './tool-events.js'
+import { createExecuteLoop } from './execute-loop.js'
 
-/** 装配浏览器扩展专属 BFF：SQLite 密钥库 + Bearer 鉴权 + harness HTTP 边界。 */
+/** 装配浏览器扩展专属 BFF：SQLite 密钥库 + Bearer 鉴权 + harness HTTP 边界 + SSE 事件流。 */
 export function createBrowserExtensionBff(options: {
   masterKey: string
   apiToken: string
   databasePath?: string
-  /** 模型配置。由 BFF 进程环境提供，扩展侧永远看不到这三个字段。 */
   llm?: LlmSecret
-  /** 审计日志。省略时使用控制台实现。传 undefined 之外的值可替换或静音。 */
   audit?: AuditLogger
-  /** LLM 调用级追踪。开启 verbose 时注入，打印完整输入输出供排障。 */
   llmTrace?: (event: LlmTraceEvent) => void
   llmMaxRetries?: number
 }) {
-  // 主密钥只存在于 BFF 进程环境，绝不写入 SQLite，也绝不暴露给浏览器扩展。
   const database = new DatabaseSync(options.databasePath ?? 'agent-kit.sqlite')
-  // 审计日志：默认开启。不注入的话服务端对失败完全没有可观测性。
   const audit = options.audit ?? createConsoleAuditLogger({ prefix: '[bff]' })
   const prompts = createPromptRegistry()
-  // free-form 先注册因此成为默认提示词：调试期的主用途是用户下自由指令。
-  // 另两个按名选择（harness.run 的 promptName）。
   prompts.register({ name: 'free-form', version: '1', prompt: freeFormPrompt })
   prompts.register({ name: 'planning', version: '1', prompt: planningPrompt, protocol: planningProtocol })
   prompts.register({ name: 'browser-automation', version: '1', prompt: browserAutomationPrompt })
@@ -75,17 +69,25 @@ export function createBrowserExtensionBff(options: {
     prompt: candidateAssessmentPrompt,
     protocol: candidateAssessmentProtocol,
   })
+
+  const bus = createEventBus()
+  const executeLoop = createExecuteLoop(bus)
+  const traceToBus = llmTraceToBus(bus)
+
   const runtime = createSqliteAgentRuntime({
     database,
     masterKey: options.masterKey,
     prompts,
     audit,
-    ...(options.llmTrace ? { llmTrace: options.llmTrace } : {}),
+    llmTrace: (event: LlmTraceEvent) => {
+      options.llmTrace?.(event)
+      traceToBus(event)
+    },
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
   for (const tool of browserToolDefinitions) runtime.tools.register(tool)
+
   const app = createAgentBff({
-    // 示例鉴权：Bearer Token 与 BFF_API_TOKEN 比对；生产环境请替换为真实会话体系。
     authenticate: async (request) => {
       const token = request.headers.get('authorization')?.replace(/^Bearer\s+/, '')
       return token && token === options.apiToken ? { subject: 'browser-extension' } : null
@@ -93,58 +95,154 @@ export function createBrowserExtensionBff(options: {
     harness: runtime.harness,
     audit,
   })
-  return { app, runtime, database, prompts, ready: seedSecret(runtime, options.llm) }
+
+  // ── SSE event stream ──────────────────────────────────
+  app.get('/api/events', (c) => {
+    if (c.req.query('token') !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const lastEventId = c.req.header('last-event-id')
+    const fromSeq = lastEventId !== undefined ? Number(lastEventId) : undefined
+
+    return streamSSE(c, async (stream) => {
+      const queue: BffEvent[] = []
+      const unsubscribe = bus.subscribe((event) => queue.push(event), fromSeq)
+      stream.onAbort(unsubscribe)
+      let lastPing = Date.now()
+      try {
+        while (!stream.aborted) {
+          while (queue.length > 0) {
+            const event = queue.shift() as BffEvent
+            await stream.writeSSE({
+              data: JSON.stringify(event),
+              event: event.type,
+              id: String(event.seq),
+            })
+          }
+          if (Date.now() - lastPing >= 15_000) {
+            await stream.write(': ping\n\n')
+            lastPing = Date.now()
+          }
+          await stream.sleep(250)
+        }
+      } finally {
+        unsubscribe()
+      }
+    })
+  })
+
+  // ── Start execution (SSE-driven) ──────────────────────
+  app.post('/api/execute', async (c) => {
+    const identity = await authenticate(c.req.raw, options.apiToken)
+    if (!identity) return c.json({ code: 'UNAUTHORIZED', message: '未通过 BFF 鉴权' }, 401)
+
+    const body = await c.req.json<{ input?: unknown; context?: unknown; sessionId?: unknown; promptName?: unknown }>()
+    if (typeof body.input !== 'string' || !body.input.trim()) {
+      return c.json({ code: 'REQUEST_INVALID', message: 'input 必须是非空字符串' }, 400)
+    }
+    if (!body.context || typeof body.context !== 'object' || Array.isArray(body.context)) {
+      return c.json({ code: 'REQUEST_INVALID', message: 'context 必须是对象' }, 400)
+    }
+    if (typeof body.sessionId !== 'string' || !body.sessionId.trim()) {
+      return c.json({ code: 'REQUEST_INVALID', message: 'sessionId 必须是非空字符串' }, 400)
+    }
+
+    const scopedSessionId = `${identity.subject}:${body.sessionId}`
+    const rawSessionId = body.sessionId
+
+    runtime.harness
+      .run({
+        sessionId: scopedSessionId,
+        input: body.input,
+        context: body.context as Record<string, unknown>,
+        ...(typeof body.promptName === 'string' ? { promptName: body.promptName } : {}),
+      })
+      .then((result) => executeLoop.dispatchResult(result, rawSessionId))
+      .catch((error: unknown) => {
+        const code = error instanceof AgentKitError ? error.code : 'INTERNAL'
+        const message = error instanceof Error ? error.message : '服务内部错误'
+        bus.emit({ type: 'error', code, message, sessionId: rawSessionId })
+      })
+
+    return c.json({ accepted: true }, 202)
+  })
+
+  // ── Submit tool result (SSE-driven) ───────────────────
+  app.post('/api/tool-results/:callId', async (c) => {
+    const identity = await authenticate(c.req.raw, options.apiToken)
+    if (!identity) return c.json({ code: 'UNAUTHORIZED', message: '未通过 BFF 鉴权' }, 401)
+
+    const callId = c.req.param('callId')
+    const body = await c.req.json<{ output?: unknown; sessionId?: unknown }>()
+    if (!Object.prototype.hasOwnProperty.call(body, 'output')) {
+      return c.json({ code: 'REQUEST_INVALID', message: '缺少工具输出' }, 400)
+    }
+    if (typeof body.sessionId !== 'string' || !body.sessionId.trim()) {
+      return c.json({ code: 'REQUEST_INVALID', message: 'sessionId 必须是非空字符串' }, 400)
+    }
+
+    const scopedSessionId = `${identity.subject}:${body.sessionId}`
+    const rawSessionId = body.sessionId
+
+    runtime.harness
+      .resume({
+        sessionId: scopedSessionId,
+        callId,
+        output: body.output,
+      })
+      .then((result) => executeLoop.dispatchResult(result, rawSessionId))
+      .catch((error: unknown) => {
+        const code = error instanceof AgentKitError ? error.code : 'INTERNAL'
+        const message = error instanceof Error ? error.message : '服务内部错误'
+        bus.emit({ type: 'error', code, message, sessionId: rawSessionId })
+      })
+
+    return c.json({ accepted: true }, 202)
+  })
+
+  const ready = seedSecret(runtime, options.llm)
+  return { app, runtime, database, prompts, bus, ready }
+}
+
+async function authenticate(request: Request, apiToken: string): Promise<{ subject: string } | null> {
+  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/, '')
+  return token && token === apiToken ? { subject: 'browser-extension' } : null
 }
 
 /** 把环境提供的模型配置写入加密密钥库；未提供时保留库中已有配置。 */
-async function seedSecret(runtime: { secrets: { put(secret: LlmSecret): Promise<void> } }, llm?: LlmSecret): Promise<void> {
+async function seedSecret(
+  rt: { secrets: { put(secret: LlmSecret): Promise<void> } },
+  llm?: LlmSecret,
+): Promise<void> {
   if (!llm) return
-  await runtime.secrets.put(llm)
+  await rt.secrets.put(llm)
 }
 
-/** 用 Node 原生 http 启动 BFF，避免引入第三方服务器适配器。 */
-export function startServer(options: { masterKey: string; apiToken: string; port?: number; llm?: LlmSecret; llmMaxRetries?: number; llmTrace?: (event: LlmTraceEvent) => void; databasePath?: string }) {
-  const { app, ready } = createBrowserExtensionBff(options)
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // 密钥写入是异步的；先等它完成再处理请求，避免首个请求撞上 SECRET_NOT_CONFIGURED。
-    await ready
-    const headers = new Headers()
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (typeof value === 'string') headers.set(key, value)
-    }
-    const body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req)
-    const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, {
-      method: req.method ?? 'GET',
-      headers,
-      body,
+/** 用 @hono/node-server 启动 BFF。 */
+export function startServer(options: {
+  masterKey: string
+  apiToken: string
+  port?: number
+  llm?: LlmSecret
+  llmMaxRetries?: number
+  llmTrace?: (event: LlmTraceEvent) => void
+  databasePath?: string
+}): Promise<{ server: ReturnType<typeof serve>; database: DatabaseSync }> {
+  const { app, ready, database } = createBrowserExtensionBff(options)
+  return new Promise((resolve) => {
+    ready.then(() => {
+      const port = options.port ?? 8787
+      const server = serve(
+        { fetch: (req: Request) => app.fetch(req), port, hostname: '127.0.0.1' },
+        () => {
+          console.log(`BFF listening on http://localhost:${port}`)
+        },
+      )
+      resolve({ server, database })
     })
-    const response = await app.fetch(request)
-    res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
-    res.end(await response.text())
-  })
-  const port = options.port ?? 8787
-  server.listen(port, () => console.log(`BFF listening on http://localhost:${port}`))
-  return server
-}
-
-/** 读取请求体为文本（Node 原生流）。 */
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
   })
 }
 
 /**
  * 从 exe/脚本 同目录的 .env 文件加载配置。
- *
- * 打包成 exe 后用户无法用 `set AGENT_KIT_MASTER_KEY=xxx` 逐个设环境变量，
- * 也不方便用 `--env-file`（exe 没有这个 flag）。所以在启动入口处手动读 .env，
- * 把 key=value 注入 process.env，已有的环境变量优先（命令行设置不被文件覆盖）。
- *
- * .env 文件格式：每行 `KEY=VALUE`，# 开头是注释，空行忽略。
  */
 function loadEnvFile(): { loaded: boolean; path: string; vars: string[] } {
   const dir = getProgramDir()
@@ -208,20 +306,15 @@ function ensureEnvTemplate(): void {
     console.log('[bff] 请填写后重新启动。')
     process.exit(0)
   } catch {
-    // 写不了也不阻塞 -- 用户可能手动建 .env。
+    // 写不了也不阻塞
   }
 }
 
-// 直接运行时启动（node dist/server.js 或 pkg 打包的 exe），被测试或库方式导入时不自动监听端口。
-// 判断逻辑：pkg 打包后 process.execPath === process.argv[0]；node 直跑时用 __filename（CJS bundle）或 import.meta.url（ESM）。
-// 注意：vitest 等测试运行器也会设置 process.argv[1]，所以额外检查 import.meta.url 或 __filename 必须精确匹配入口文件。
 const isMainModule = process.execPath === process.argv[0] ||
   (typeof __filename !== 'undefined' && process.argv[1] === __filename && !process.env.VITEST) ||
   (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}` && !process.env.VITEST)
 if (process.argv[1] && isMainModule && !process.env.VITEST) {
-  // 首次启动：如果同目录没有 .env，生成模板并退出，引导用户填写。
   ensureEnvTemplate()
-  // 从 .env 文件加载配置（已有的环境变量优先）。
   const envResult = loadEnvFile()
   if (envResult.loaded) {
     console.log(`[bff] 已从 ${envResult.path} 加载配置：${envResult.vars.join(', ')}`)
@@ -250,9 +343,24 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
   const llmMaxRetries = Number(process.env.LLM_MAX_RETRIES ?? '3')
   const port = Number(process.env.PORT ?? '8787')
   const dbPath = join(getProgramDir(), 'agent-kit.sqlite')
-  if (llmTrace) {
-    startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmTrace, llmMaxRetries, port, databasePath: dbPath })
-  } else {
-    startServer({ masterKey, apiToken, llm: { apiKey, baseUrl, model }, llmMaxRetries, port, databasePath: dbPath })
+
+  const launch = async () => {
+    const { server, database } = await startServer({
+      masterKey,
+      apiToken,
+      llm: { apiKey, baseUrl, model },
+      ...(llmTrace ? { llmTrace } : {}),
+      llmMaxRetries,
+      port,
+      databasePath: dbPath,
+    })
+    const shutdown = () => {
+      server.close()
+      database.close()
+      process.exit(0)
+    }
+    process.on('SIGTERM', shutdown)
+    process.on('SIGINT', shutdown)
   }
+  void launch()
 }
