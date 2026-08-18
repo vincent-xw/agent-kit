@@ -344,6 +344,7 @@ export const candidateAssessmentPrompt = [
  */
 export const freeFormPrompt = [
   '你在通过一组浏览器工具操作用户当前打开的网页。用户会用自然语言描述想做的事，由你规划并执行。',
+  '所有思考过程和最终回复均使用中文。',
   '',
   '工作方式：',
   '1. 先调用 browser_snapshot 看清页面上有哪些可交互元素。不要凭猜测写 CSS 选择器。',
@@ -473,6 +474,7 @@ export const planningProtocol = z.object({
  */
 export const browserAutomationPrompt = [
   '你在通过一组浏览器工具操作真实网页，目标站点是 BOSS 直聘。',
+  '所有思考过程和最终回复均使用中文。',
   '',
   '执行纪律（必须遵守）：',
   '1. 每一步只执行一个写动作（click / input_text / press_key / scroll）。',
