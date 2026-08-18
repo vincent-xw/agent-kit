@@ -326,6 +326,37 @@ async function completeStream(
         continue
       }
 
+      // 端点可能忽略 stream:true 返回普通 JSON（某些代理或不支持流式的端点），
+      // 或测试 mock 不提供 body/headers。检测 content-type 做 fallback。
+      const contentType = response.headers?.get?.('content-type') ?? ''
+      if (!contentType.includes('text/event-stream')) {
+        let payload: unknown
+        try {
+          payload = await response.json()
+        } catch {
+          // response.json() 不可用（例如 mock 没提供），尝试读 text 再解析。
+          try {
+            const text = await (response as { text(): Promise<string> }).text()
+            payload = JSON.parse(text)
+          } catch {
+            lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应不是有效 JSON 也不是 SSE 流')
+            if (attempt < maxRetries) continue
+            throw lastError
+          }
+        }
+        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+        const result = extractResult(payload)
+        if (!result) {
+          lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
+          if (attempt < maxRetries) continue
+          throw lastError
+        }
+        if (result.type === 'final' && typeof result.output === 'string') {
+          onDelta({ content: result.output, ...(result.reasoning ? { reasoning: result.reasoning } : {}) })
+        }
+        return result
+      }
+
       if (!response.body) {
         lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 流式响应没有 body')
         if (attempt < maxRetries) continue

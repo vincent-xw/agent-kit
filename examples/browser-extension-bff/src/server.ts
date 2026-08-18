@@ -83,6 +83,9 @@ export function createBrowserExtensionBff(options: {
       options.llmTrace?.(event)
       traceToBus(event)
     },
+    llmDelta: (delta) => {
+      bus.emit({ type: 'llm_delta', ...delta })
+    },
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
   for (const tool of browserToolDefinitions) runtime.tools.register(tool)
