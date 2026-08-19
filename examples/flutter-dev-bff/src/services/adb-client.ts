@@ -162,9 +162,17 @@ export class AdbClient {
 
   async dumpUiHierarchy(deviceSerial?: string): Promise<string> {
     const serial = deviceSerial ?? (await this.getDefaultSerial())
-    const remotePath = '/sdcard/agent_ui_dump.xml'
-    await this.exec(['-s', serial, 'shell', 'uiautomator', 'dump', remotePath], { timeoutMs: 30_000 })
+    // 每次用唯一文件名，并先删除，避免 uiautomator 写文件失败/超时时
+    // cat 读到上一次的旧内容，导致 LLM 拿到过时的屏幕。
+    const remotePath = `/sdcard/agent_ui_${Date.now()}_${Math.floor(Math.random() * 100000)}.xml`
+    const dumpOutput = await this.exec(['-s', serial, 'shell', 'uiautomator', 'dump', remotePath], { timeoutMs: 30_000 })
+    // uiautomator dump 失败时输出不含成功标记，此时不读文件直接抛错，避免返回旧数据
+    if (!dumpOutput.includes('dumped to')) {
+      throw new Error(`uiautomator dump 失败：${dumpOutput.trim().slice(0, 200)}`)
+    }
     const output = await this.exec(['-s', serial, 'shell', 'cat', remotePath], { timeoutMs: 10_000 })
+    // 读取后清理，避免残留
+    await this.exec(['-s', serial, 'shell', 'rm', '-f', remotePath], { timeoutMs: 5_000 }).catch(() => {})
     return output
   }
 
