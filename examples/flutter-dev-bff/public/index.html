@@ -202,6 +202,8 @@ const docsContent = document.getElementById('docs-content');
 document.getElementById('docs-btn').addEventListener('click', async () => {
   docsOverlay.classList.add('open');
   if (docsContent.dataset.loaded === '1') return;
+  // 默认加载 custom-tools.html（由 Markdown 插件从 docs/custom-tools.md 生成）
+  // 其他文档：docs/index.md、tools.md、skills.md、settings.md、companion.md
   docsContent.innerHTML = '加载中…';
   try {
     const res = await fetch('custom-tools.html');
@@ -209,7 +211,7 @@ document.getElementById('docs-btn').addEventListener('click', async () => {
       docsContent.innerHTML = await res.text();
       docsContent.dataset.loaded = '1';
     } else {
-      docsContent.innerHTML = '<p style="color:var(--text2)">文档未找到。请用 Markdown 转 HTML 插件将 docs/custom-tools.md 转为 public/custom-tools.html。</p>';
+      docsContent.innerHTML = '<p style="color:var(--text2)">文档未找到。请用 Markdown 转 HTML 插件将 docs/*.md 转为 public/*.html。</p>';
     }
   } catch (e) {
     docsContent.innerHTML = `<p style="color:var(--error)">加载失败：${escapeHtml(e.message)}</p>`;
