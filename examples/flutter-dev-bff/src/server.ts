@@ -37,6 +37,7 @@ import { debuggingPrompt, freeFormPrompt, testingPrompt } from './prompts.js'
 import { AdbClient } from './services/adb-client.js'
 import { UiAutomatorDumpProvider } from './services/uiautomator-provider.js'
 import { CompanionProvider } from './services/companion-provider.js'
+import { FallbackSnapshotProvider } from './services/fallback-provider.js'
 import type { SnapshotProvider } from './services/device-provider.js'
 import { FlutterProcessManager } from './services/flutter-process-manager.js'
 import { VmServiceClient } from './services/vm-service-client.js'
@@ -75,9 +76,12 @@ export async function createFlutterDevBff(options: {
     : join(programDir, '..', 'public')
 
   const adb = new AdbClient()
+  const uiautomator = new UiAutomatorDumpProvider(adb)
+  // COMPANION_ENABLED 时用 Companion 优先、uiautomator 兜底；
+  // Companion 不可用自动降级，恢复后自动切回。
   const device: SnapshotProvider = process.env.COMPANION_ENABLED === '1'
-    ? new CompanionProvider(adb)
-    : new UiAutomatorDumpProvider(adb)
+    ? new FallbackSnapshotProvider(new CompanionProvider(adb), uiautomator)
+    : uiautomator
   const webView = new CdpClient(adb)
   const flutter = new FlutterProcessManager({ projectPath: options.flutterProjectPath })
   const screenshots = new ScreenshotStore(screenshotDir)
