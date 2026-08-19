@@ -10,10 +10,10 @@ import androidx.appcompat.app.AppCompatActivity
 /**
  * 引导用户开启无障碍权限，并启动 HTTP 服务器。
  * 服务器绑定 127.0.0.1:7777，仅 BFF 通过 adb forward 连接。
+ * 服务器由 CompanionAccessibilityService.onServiceConnected 启动，
+ * 此 Activity 仅在服务未连接时引导开启权限。
  */
 class MainActivity : AppCompatActivity() {
-
-    private var httpServer: CompanionHttpServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,18 +25,19 @@ class MainActivity : AppCompatActivity() {
         checkAccessibilityAndStart()
     }
 
-    override fun onDestroy() {
-        httpServer?.stop()
-        super.onDestroy()
-    }
-
     private fun checkAccessibilityAndStart() {
         val service = CompanionAccessibilityService.instance
         if (service == null) {
+            // 服务未连接：服务启动的服务器会随权限开启后由 onServiceConnected 补启动
             showEnableDialog()
             return
         }
-        startHttpServer()
+        try {
+            HttpServerHolder.start()
+            Toast.makeText(this, "HTTP 服务器已启动: 127.0.0.1:7777", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "服务器启动失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showEnableDialog() {
@@ -49,15 +50,5 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("退出") { _, _ -> finish() }
             .setCancelable(false)
             .show()
-    }
-
-    private fun startHttpServer() {
-        if (httpServer != null) return
-        try {
-            httpServer = CompanionHttpServer().apply { start() }
-            Toast.makeText(this, "HTTP 服务器已启动: 127.0.0.1:7777", Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "服务器启动失败: ${e.message}", Toast.LENGTH_LONG).show()
-        }
     }
 }

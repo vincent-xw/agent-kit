@@ -28,6 +28,9 @@ class CompanionAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // 服务连接后立即启动 HTTP 服务器，不依赖 MainActivity 的 onResume。
+        // onResume 可能在服务异步绑定前执行，导致 instance 仍为 null 而跳过启动。
+        HttpServerHolder.start()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {

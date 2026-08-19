@@ -63,9 +63,9 @@ class CompanionHttpServer(port: Int = 7777) : NanoHTTPD("127.0.0.1", port) {
     private fun handleNodeAction(uri: String, session: IHTTPSession): Response {
         // 解析 /node/{ref}/{action}
         val parts = uri.trim('/').split('/')
-        if (parts.size < 2) return error("路径格式错误")
-        val ref = parts[0].toIntOrNull() ?: return error("ref 必须是整数")
-        val action = parts[1]
+        if (parts.size < 3) return error("路径格式错误")
+        val ref = parts[1].toIntOrNull() ?: return error("ref 必须是整数")
+        val action = parts[2]
         val body = parseBody(session)
 
         val service = CompanionAccessibilityService.instance ?: return error("服务未就绪")
@@ -99,11 +99,14 @@ class CompanionHttpServer(port: Int = 7777) : NanoHTTPD("127.0.0.1", port) {
         }
     }
 
-    private fun findNodeByRef(node: AccessibilityNodeInfo, targetRef: Int, currentRef: IntArray = intArrayOf(0)): AccessibilityNodeInfo? {
-        if (!isInteresting(node)) return null
-        currentRef[0]++
-        if (currentRef[0] == targetRef) return node
-        if (currentRef[0] > 500) return null
+    private fun findNodeByRef(node: AccessibilityNodeInfo, targetRef: Int, currentRef: IntArray = intArrayOf(-1)): AccessibilityNodeInfo? {
+        // 与 NodeTreeDumper 保持一致：先记录当前节点（若 interesting），再无条件遍历子节点。
+        // ref 从 0 开始。isInteresting 不通过的节点也继续遍历子树，保证 ref 编号一致。
+        if (isInteresting(node)) {
+            currentRef[0]++
+            if (currentRef[0] == targetRef) return node
+        }
+        if (currentRef[0] >= 500) return null
         for (i in 0 until node.childCount) {
             node.getChild(i)?.let { child ->
                 val found = findNodeByRef(child, targetRef, currentRef)

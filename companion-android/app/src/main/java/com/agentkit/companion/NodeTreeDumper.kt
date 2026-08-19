@@ -21,39 +21,41 @@ object NodeTreeDumper {
         result: JSONArray,
         nextRef: () -> Int,
     ) {
-        if (!isInteresting(node)) return
+        // 先记录当前节点（若 interesting），再无条件遍历子节点。
+        // 不能因根节点不 interesting 就跳过整棵子树——根通常是容器无文本。
+        if (isInteresting(node)) {
+            val obj = JSONObject()
+            val ref = nextRef()
+            obj.put("ref", ref)
+            obj.put("nodeId", "node:$ref")
 
-        val obj = JSONObject()
-        val ref = nextRef()
-        obj.put("ref", ref)
-        obj.put("nodeId", "node:$ref")
+            node.text?.toString()?.takeIf { it.isNotBlank() }?.let { obj.put("text", it) }
+            node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { obj.put("contentDescription", it) }
+            node.className?.toString()?.takeIf { it.isNotBlank() }?.let { obj.put("className", it) }
+            node.viewIdResourceName?.takeIf { it.isNotBlank() }?.let { obj.put("resourceId", it) }
 
-        node.text?.toString()?.takeIf { it.isNotBlank() }?.let { obj.put("text", it) }
-        node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { obj.put("contentDescription", it) }
-        node.className?.toString()?.takeIf { it.isNotBlank() }?.let { obj.put("className", it) }
-        node.viewIdResourceName?.takeIf { it.isNotBlank() }?.let { obj.put("resourceId", it) }
+            val bounds = android.graphics.Rect()
+            node.getBoundsInScreen(bounds)
+            val boundsObj = JSONObject().apply {
+                put("left", bounds.left)
+                put("top", bounds.top)
+                put("right", bounds.right)
+                put("bottom", bounds.bottom)
+            }
+            obj.put("bounds", boundsObj)
+            obj.put("clickable", node.isClickable)
+            obj.put("scrollable", node.isScrollable)
+            obj.put("editable", node.isEditable)
+            obj.put("enabled", node.isEnabled)
+            obj.put("focused", node.isFocused)
+            obj.put("checked", node.isChecked)
+            obj.put("selected", node.isSelected)
 
-        val bounds = android.graphics.Rect()
-        node.getBoundsInScreen(bounds)
-        val boundsObj = JSONObject().apply {
-            put("left", bounds.left)
-            put("top", bounds.top)
-            put("right", bounds.right)
-            put("bottom", bounds.bottom)
+            result.put(obj)
         }
-        obj.put("bounds", boundsObj)
-        obj.put("clickable", node.isClickable)
-        obj.put("scrollable", node.isScrollable)
-        obj.put("editable", node.isEditable)
-        obj.put("enabled", node.isEnabled)
-        obj.put("focused", node.isFocused)
-        obj.put("checked", node.isChecked)
-        obj.put("selected", node.isSelected)
-
-        result.put(obj)
 
         // 限制递归深度，避免过深节点
-        if (ref < 500) {
+        if (result.length() < 500) {
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { child ->
                     traverse(child, result, nextRef)
