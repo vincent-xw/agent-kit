@@ -686,7 +686,11 @@ async function sendMessage(text) {
       result = await fetch(`${BASE}/v1/agent/sessions/${sessionId}/continue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN}` },
-        body: JSON.stringify({ context: { timestamp: new Date().toISOString(), platform: 'android' } }),
+        body: JSON.stringify({
+          context: { timestamp: new Date().toISOString(), platform: 'android' },
+          // 关键：continue 时必须带上 promptName，否则会回退到默认提示词
+          ...(promptEl.value !== 'free-form' ? { promptName: promptEl.value } : {}),
+        }),
       }).then((r) => r.json());
     }
 
