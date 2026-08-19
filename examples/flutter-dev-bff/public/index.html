@@ -73,6 +73,7 @@
   #skills-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
   #skills-overlay.open { display: flex; }
   #skills-panel { width: 420px; max-width: 92vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  #skills-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #skills-panel h2 { font-size: 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
   #skills-panel h2 button { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
   #skills-tabs { display: flex; gap: 0; }
@@ -96,13 +97,21 @@
   #skill-form textarea { min-height: 180px; resize: vertical; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.5; }
   #skill-form .form-actions { display: flex; gap: 8px; margin-top: 4px; }
   #skill-form .form-actions button { flex: 1; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  #intent-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text); font-size: 14px; width: 100%; min-height: 90px; max-height: 200px; font-family: inherit; resize: none; scrollbar-width: none; -ms-overflow-style: none; }
+  #intent-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; color: var(--text); font-size: 14px; width: 100%; flex: 1; min-height: 120px; font-family: inherit; resize: none; scrollbar-width: none; -ms-overflow-style: none; line-height: 1.6; }
   #intent-input::-webkit-scrollbar { display: none; }
   #intent-input:focus { outline: none; border-color: var(--accent); }
+  #new-skill-form { display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
+  #new-skill-form > .back { flex-shrink: 0; }
+  #new-skill-form h3 { flex-shrink: 0; }
+  #new-skill-form .form-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 8px; }
+  #new-skill-form .form-actions button { flex: 1; padding: 11px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
+  #new-skill-form h3 { font-size: 15px; margin: 4px 0; }
+  #generate-status { min-height: 20px; }
   .empty-state { text-align: center; color: var(--text2); font-size: 13px; padding: 40px 20px; line-height: 1.8; }
   .generating { color: var(--accent); font-size: 12px; text-align: center; padding: 12px; }
   .skill-detail { display: flex; flex-direction: column; gap: 10px; }
-  .skill-detail .back { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0; text-align: left; }
+  .skill-detail .back, .back { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0; text-align: left; flex-shrink: 0; align-self: flex-start; }
+  .back:hover { text-decoration: underline; }
   .skill-detail pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 11px; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
   .runs-list { font-size: 12px; }
   .run-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 6px; }
@@ -284,14 +293,19 @@ async function renderSkillList() {
 function renderNewSkillForm() {
   skillsContent.innerHTML = `
     <button class="back" id="back-to-list">← 返回列表</button>
-    <h3 style="font-size:14px;margin:4px 0">用大白话描述你想做什么</h3>
-    <textarea id="intent-input" placeholder="例如：打开真实场景 Demo，用账号 13800138000 密码 test123 登录，验证码填 123456，进入第一个订单，打开帮助中心，在 H5 页面用 e2e_user / pass1234 登录"></textarea>
-    <div class="form-actions">
-      <button class="btn-primary" id="generate-btn" style="padding:10px;border:none;border-radius:6px;cursor:pointer;">生成 Skill</button>
-    </div>
-    <div id="generate-status"></div>`;
+    <form id="new-skill-form">
+      <h3>用大白话描述你想做什么</h3>
+      <textarea id="intent-input" placeholder="例如：打开真实场景 Demo，用账号 13800138000 密码 test123 登录，验证码填 123456，进入第一个订单，打开帮助中心，在 H5 页面用 e2e_user / pass1234 登录"></textarea>
+      <div id="generate-status"></div>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="cancel-skill-gen" style="padding:10px;border-radius:8px;cursor:pointer;font-size:14px;">取消</button>
+        <button type="submit" class="btn-primary" id="generate-btn" style="padding:10px;border:none;border-radius:8px;cursor:pointer;font-size:14px;">生成 Skill</button>
+      </div>
+    </form>`;
   document.getElementById('back-to-list').addEventListener('click', renderSkillList);
-  document.getElementById('generate-btn').addEventListener('click', async () => {
+  document.getElementById('cancel-skill-gen').addEventListener('click', renderSkillList);
+  document.getElementById('new-skill-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
     const intent = document.getElementById('intent-input').value.trim();
     if (!intent) return;
     const statusEl = document.getElementById('generate-status');
