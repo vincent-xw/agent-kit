@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Flutter Dev BFF &#x4f7f;&#x7528;&#x6307;&#x5357;</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <span id="markdown-mermaid" aria-hidden="true" data-config="{&quot;darkModeTheme&quot;:&quot;vscode&quot;,&quot;lightModeTheme&quot;:&quot;vscode&quot;,&quot;maxTextSize&quot;:50000,&quot;clickDrag&quot;:&quot;alt&quot;,&quot;showControls&quot;:&quot;onHoverOrFocus&quot;,&quot;resizable&quot;:true,&quot;maxHeight&quot;:&quot;&quot;}"></span>
+				<h1 id="flutter-dev-bff-使用指南">Flutter Dev BFF 使用指南</h1>
+<p>Flutter Dev BFF 是一个面向 Flutter 项目开发自测阶段的 AI Agent 辅助工具。它通过 adb 和 Android 无障碍服务操作连接的设备,支持 UI 自动化、热重载、日志读取、静态分析、测试运行,并可通过 WebView CDP 操作 H5 页面、通过视觉模型分析屏幕截图。</p>
+<h2 id="快速开始">快速开始</h2>
+<h3 id="1-前置条件">1. 前置条件</h3>
+<ul>
+<li>Node.js 22+</li>
+<li>pnpm</li>
+<li>Android SDK(adb 在 PATH 中)</li>
+<li>一台已连接的 Android 设备或模拟器(<code>adb devices</code> 可见)</li>
+<li>一个 LLM API Key(OpenAI 兼容接口,如 DeepSeek)</li>
+</ul>
+<h3 id="2-安装与配置">2. 安装与配置</h3>
+<pre><code class="language-bash"><span class="hljs-comment"># 在仓库根目录</span>
+pnpm install
+
+<span class="hljs-comment"># 进入 BFF 目录</span>
+<span class="hljs-built_in">cd</span> examples/flutter-dev-bff
+<span class="hljs-built_in">cp</span> .env.example .<span class="hljs-built_in">env</span>
+</code></pre>
+<p>编辑 <code>.env</code>,至少填写:</p>
+<pre><code class="language-env">AGENT_KIT_MASTER_KEY=&lt;openssl rand -base64 32 | tr +/ -_ | tr -d =&gt;
+BFF_API_TOKEN=dev-token
+FLUTTER_PROJECT_PATH=/path/to/your/flutter/app
+LLM_API_KEY=sk-xxx
+LLM_MODEL=deepseek-chat
+LLM_BASE_URL=https://api.deepseek.com
+</code></pre>
+<h3 id="3-启动">3. 启动</h3>
+<pre><code class="language-bash"><span class="hljs-comment"># 开发模式(自动 build + watch)</span>
+pnpm dev:flutter
+
+<span class="hljs-comment"># 或生产模式</span>
+pnpm start:flutter
+</code></pre>
+<p>打开 <a href="http://localhost:8788">http://localhost:8788</a></p>
+<h3 id="4-第一次使用">4. 第一次使用</h3>
+<p>在输入框输入:</p>
+<blockquote>
+<p>启动应用,检查首页是否正常显示</p>
+</blockquote>
+<p>Agent 会自动:</p>
+<ol>
+<li>调用 <code>mobile_devices</code> 确认设备连接</li>
+<li>调用 <code>flutter_run_start</code> 启动 debug 应用</li>
+<li>调用 <code>mobile_snapshot</code> 读取当前界面</li>
+<li>返回中文总结</li>
+</ol>
+<h2 id="功能概览">功能概览</h2>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>工具</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>设备管理</td>
+<td><code>mobile_devices</code>、<code>mobile_app_*</code></td>
+<td>列出设备、安装、启动、停止应用</td>
+</tr>
+<tr>
+<td>UI 自动化</td>
+<td><code>mobile_snapshot</code>、<code>mobile_tap_node</code>、<code>mobile_set_text</code> 等</td>
+<td>基于无障碍树,支持中文输入</td>
+</tr>
+<tr>
+<td>坐标降级</td>
+<td><code>mobile_tap</code>、<code>mobile_swipe</code></td>
+<td>无障碍树不可用时使用</td>
+</tr>
+<tr>
+<td>视觉分析</td>
+<td><code>mobile_screen_analyze</code></td>
+<td>截图送多模态模型,返回文字描述</td>
+</tr>
+<tr>
+<td>WebView</td>
+<td><code>web_snapshot</code>、<code>web_tap</code> 等</td>
+<td>通过 CDP 操作 H5 页面</td>
+</tr>
+<tr>
+<td>Flutter 开发</td>
+<td><code>flutter_run_*</code>、<code>flutter_hot_*</code>、<code>flutter_logs</code>、<code>flutter_eval</code></td>
+<td>热重载、日志、Dart 表达式</td>
+</tr>
+<tr>
+<td>静态分析/测试</td>
+<td><code>flutter_analyze</code>、<code>flutter_test</code></td>
+<td>运行 analyze 和 test</td>
+</tr>
+<tr>
+<td>自定义扩展</td>
+<td>Tool 插件</td>
+<td>在 <code>tools/</code> 目录放 JS/TS 文件扩展能力</td>
+</tr>
+</tbody>
+</table>
+<h2 id="文档索引">文档索引</h2>
+<ul>
+<li><a href="tools.html">工具参考</a> — 全部 25 个工具的详细说明</li>
+<li><a href="skills.html">Skill 系统</a> — 用大白话生成可复用流程</li>
+<li><a href="settings.html">配置说明</a> — 环境变量、视觉模型、Companion App</li>
+<li><a href="custom-tools.html">自定义工具</a> — 开发自己的工具插件</li>
+<li><a href="companion.html">Companion App</a> — 更快的无障碍服务(可选)</li>
+</ul>
+<h2 id="常见问题">常见问题</h2>
+<p><strong>Agent 说找不到设备?</strong>
+运行 <code>adb devices</code> 确认设备已连接且授权。无线调试需先 <code>adb connect</code>。</p>
+<p><strong>中文输入失败?</strong>
+需要安装 ADBKeyBoard 输入法,运行 <code>pnpm ime:setup</code>。ASCII 文本无需此输入法。</p>
+<p><strong>热重载不生效?</strong>
+先确认 <code>flutter_run_start</code> 已成功启动(VM Service 已连接)。如果状态异常,用 <code>flutter_hot_restart</code> 重置。</p>
+<p><strong>Agent 看不到截图?</strong>
+Agent 本身不能看图,需要用 <code>mobile_screen_analyze</code> 把截图发给视觉模型转成文字。配置见 <a href="settings.html">配置说明</a>。</p>
+
+            
+            
+        </body>
+        </html>

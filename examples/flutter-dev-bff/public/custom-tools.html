@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>&#x81ea;&#x5b9a;&#x4e49;&#x5de5;&#x5177;&#x5f00;&#x53d1;&#x6307;&#x5357;</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex/dist/katex.min.css">
+<link href="https://cdn.jsdelivr.net/npm/katex-copytex@latest/dist/katex-copytex.min.css" rel="stylesheet" type="text/css">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <span id="markdown-mermaid" aria-hidden="true" data-config="{&quot;darkModeTheme&quot;:&quot;vscode&quot;,&quot;lightModeTheme&quot;:&quot;vscode&quot;,&quot;maxTextSize&quot;:50000,&quot;clickDrag&quot;:&quot;alt&quot;,&quot;showControls&quot;:&quot;onHoverOrFocus&quot;,&quot;resizable&quot;:true,&quot;maxHeight&quot;:&quot;&quot;}"></span>
+				<h1 id="自定义工具开发指南">自定义工具开发指南</h1>
+<h2 id="概述">概述</h2>
+<p>Flutter Dev BFF 内置了 25 个工具（设备操作、无障碍交互、WebView、视觉分析、Flutter 开发流程）。你可以通过在 <code>tools/</code> 目录放置 JS/TS 文件来扩展 Agent 的能力，<strong>无需修改 BFF 源码或重新编译</strong>。</p>
+<p>插件的定位是「给 Agent 装上业务能力」——查订单、调内部 API、控制 IoT 设备、查询数据库等。操作手机的工具都已内置，插件不直接访问 adb 或截图服务。</p>
+<h2 id="快速开始">快速开始</h2>
+<h3 id="1-创建工具文件">1. 创建工具文件</h3>
+<p>在项目根目录创建 <code>tools/weather.ts</code>：</p>
+<pre><code class="language-ts"><span class="hljs-keyword">import</span> { defineTool } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;@agentkit/flutter-dev-bff/define&#x27;</span>
+<span class="hljs-keyword">import</span> { z } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;zod&#x27;</span>
+
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">default</span> <span class="hljs-title function_">defineTool</span>({
+  <span class="hljs-attr">name</span>: <span class="hljs-string">&#x27;query_weather&#x27;</span>,
+  <span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;查询指定城市的当前天气&#x27;</span>,
+  <span class="hljs-attr">input</span>: z.<span class="hljs-title function_">object</span>({
+    <span class="hljs-attr">city</span>: z.<span class="hljs-title function_">string</span>().<span class="hljs-title function_">describe</span>(<span class="hljs-string">&#x27;城市名，如「杭州」&#x27;</span>),
+  }),
+  <span class="hljs-attr">output</span>: z.<span class="hljs-title function_">object</span>({
+    <span class="hljs-attr">temp</span>: z.<span class="hljs-title function_">number</span>(),
+    <span class="hljs-attr">condition</span>: z.<span class="hljs-title function_">string</span>(),
+  }).<span class="hljs-title function_">optional</span>(),
+  <span class="hljs-attr">execute</span>: <span class="hljs-keyword">async</span> ({ city }) =&gt; {
+    <span class="hljs-keyword">const</span> apiKey = process.<span class="hljs-property">env</span>.<span class="hljs-property">WEATHER_API_KEY</span>
+    <span class="hljs-keyword">const</span> res = <span class="hljs-keyword">await</span> <span class="hljs-title function_">fetch</span>(
+      <span class="hljs-string">`https://api.weather.com/current?q=<span class="hljs-subst">${<span class="hljs-built_in">encodeURIComponent</span>(city)}</span>&amp;key=<span class="hljs-subst">${apiKey}</span>`</span>
+    )
+    <span class="hljs-keyword">if</span> (!res.<span class="hljs-property">ok</span>) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Error</span>(<span class="hljs-string">`天气 API 返回 <span class="hljs-subst">${res.status}</span>`</span>)
+    <span class="hljs-keyword">return</span> res.<span class="hljs-title function_">json</span>()
+  },
+})
+</code></pre>
+<h3 id="2-启动-bff">2. 启动 BFF</h3>
+<pre><code class="language-bash">pnpm dev:flutter
+</code></pre>
+<p>日志会显示：</p>
+<pre><code>[flutter-bff] 加载了 1 个用户工具插件：query_weather
+</code></pre>
+<h3 id="3-使用工具">3. 使用工具</h3>
+<p>在 Web UI 里对 Agent 说「查一下杭州的天气」，Agent 会自动调用 <code>query_weather</code>。</p>
+<p>修改文件保存后会自动热重载，无需重启。</p>
+<h2 id="插件目录">插件目录</h2>
+<p>BFF 启动时扫描两个目录：</p>
+<table>
+<thead>
+<tr>
+<th>目录</th>
+<th>用途</th>
+<th>提交到 git</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>./tools/*.{js,ts,mjs,cjs}</code></td>
+<td>项目级工具，跟项目走</td>
+<td>✅ 推荐</td>
+</tr>
+<tr>
+<td><code>~/.agentkit/tools/*.{js,ts,mjs,cjs}</code></td>
+<td>全局工具，你自己的</td>
+<td>❌ 不提交</td>
+</tr>
+</tbody>
+</table>
+<p>同名工具的优先级：<strong>项目级 &gt; 全局级 &gt; 内置工具</strong>。这样团队可以用项目级工具覆盖默认行为。</p>
+<h2 id="api-参考">API 参考</h2>
+<h3 id="definetooldefinition">defineTool(definition)</h3>
+<p>identity 函数，仅用于 TypeScript 类型推断。返回传入的 definition。</p>
+<pre><code class="language-ts"><span class="hljs-keyword">import</span> { defineTool } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;@agentkit/flutter-dev-bff/define&#x27;</span>
+<span class="hljs-keyword">import</span> { z } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;zod&#x27;</span>
+
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">default</span> <span class="hljs-title function_">defineTool</span>({
+  <span class="hljs-attr">name</span>: <span class="hljs-string">&#x27;my_tool&#x27;</span>,
+  <span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;工具用途说明，Agent 据此决定何时调用&#x27;</span>,
+  <span class="hljs-attr">input</span>: z.<span class="hljs-title function_">object</span>({ ... }),
+  <span class="hljs-attr">output</span>: z.<span class="hljs-title function_">object</span>({ ... }).<span class="hljs-title function_">optional</span>(),
+  <span class="hljs-attr">execute</span>: <span class="hljs-keyword">async</span> (input) =&gt; { ... },
+})
+</code></pre>
+<h3 id="工具定义字段">工具定义字段</h3>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td><code>string</code></td>
+<td>✅</td>
+<td>工具名，snake_case，全局唯一</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td><code>string</code></td>
+<td>✅</td>
+<td>告诉 Agent 这个工具做什么、什么时候用</td>
+</tr>
+<tr>
+<td><code>input</code></td>
+<td><code>z.ZodType</code></td>
+<td>✅</td>
+<td>用 zod 声明输入参数 schema</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td><code>z.ZodType</code></td>
+<td>❌</td>
+<td>用 zod 声明返回值 schema，声明则校验</td>
+</tr>
+<tr>
+<td><code>execute</code></td>
+<td><code>(input, context?) =&gt; Promise&lt;unknown&gt;</code></td>
+<td>✅</td>
+<td>工具执行函数</td>
+</tr>
+</tbody>
+</table>
+<h3 id="运行环境">运行环境</h3>
+<p>插件运行在 Node.js 22+，可以使用：</p>
+<ul>
+<li><strong>全局 <code>fetch</code></strong> — 调用任何 HTTP API</li>
+<li><strong><code>process.env</code></strong> — 读取环境变量和密钥</li>
+<li><strong>Node 内置模块</strong> — <code>crypto</code>、<code>fs</code>、<code>path</code>、<code>stream</code> 等</li>
+<li><strong><code>zod</code></strong> — schema 校验（BFF 已安装，直接 import）</li>
+</ul>
+<p>插件<strong>不能</strong>访问：</p>
+<ul>
+<li><code>adb</code> / <code>CdpClient</code> / <code>VisionClient</code> 等 BFF 内部服务</li>
+<li>BFF 的 Hono app 或 runtime</li>
+<li>文件系统的任意路径（虽然技术上可以，但不推荐）</li>
+</ul>
+<p>这些限制是有意的——操作手机的能力全部由内置工具提供，插件专注于业务逻辑。</p>
+<h2 id="编写高质量工具">编写高质量工具</h2>
+<h3 id="description-要写清楚何时用">description 要写清楚「何时用」</h3>
+<p>Agent 根据 description 判断要不要调用工具。差的 description：</p>
+<pre><code class="language-ts"><span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;查天气&#x27;</span>
+</code></pre>
+<p>好的 description：</p>
+<pre><code class="language-ts"><span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;查询指定中国城市的实时天气。当用户询问天气、气温、出门是否带伞时使用。&#x27;</span>
+</code></pre>
+<h3 id="input-用-describe-说明参数">input 用 describe 说明参数</h3>
+<pre><code class="language-ts"><span class="hljs-attr">input</span>: z.<span class="hljs-title function_">object</span>({
+  <span class="hljs-attr">city</span>: z.<span class="hljs-title function_">string</span>().<span class="hljs-title function_">describe</span>(<span class="hljs-string">&#x27;城市名，不带「市」字，如「杭州」&#x27;</span>),
+  <span class="hljs-attr">days</span>: z.<span class="hljs-title function_">number</span>().<span class="hljs-title function_">min</span>(<span class="hljs-number">1</span>).<span class="hljs-title function_">max</span>(<span class="hljs-number">7</span>).<span class="hljs-title function_">describe</span>(<span class="hljs-string">&#x27;预报天数，1-7&#x27;</span>),
+})
+</code></pre>
+<p>这些描述会发给 LLM，帮助它正确填参数。</p>
+<h3 id="错误要抛出不要返回">错误要抛出，不要返回</h3>
+<pre><code class="language-ts"><span class="hljs-comment">// ✅ 好：抛错，BFF 会转成工具失败结果发给 LLM</span>
+<span class="hljs-keyword">if</span> (!res.<span class="hljs-property">ok</span>) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Error</span>(<span class="hljs-string">`API 返回 <span class="hljs-subst">${res.status}</span>`</span>)
+
+<span class="hljs-comment">// ❌ 差：返回错误对象，LLM 不知道失败了</span>
+<span class="hljs-keyword">return</span> { <span class="hljs-attr">error</span>: <span class="hljs-string">&#x27;API failed&#x27;</span> }
+</code></pre>
+<h3 id="敏感信息走环境变量">敏感信息走环境变量</h3>
+<pre><code class="language-ts"><span class="hljs-keyword">const</span> token = process.<span class="hljs-property">env</span>.<span class="hljs-property">MY_SERVICE_TOKEN</span>
+<span class="hljs-keyword">if</span> (!token) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Error</span>(<span class="hljs-string">&#x27;缺少 MY_SERVICE_TOKEN 环境变量&#x27;</span>)
+</code></pre>
+<p>在 <code>.env</code> 文件里配置（已被 gitignore）。</p>
+<h3 id="返回-json-可序列化数据">返回 JSON 可序列化数据</h3>
+<p>只能返回 JSON.stringify 能处理的数据：对象、数组、字符串、数字、布尔、null。不要返回 class 实例、函数、Symbol。</p>
+<h2 id="示例">示例</h2>
+<h3 id="调用内部-rest-api">调用内部 REST API</h3>
+<pre><code class="language-ts"><span class="hljs-keyword">import</span> { defineTool } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;@agentkit/flutter-dev-bff/define&#x27;</span>
+<span class="hljs-keyword">import</span> { z } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;zod&#x27;</span>
+
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">default</span> <span class="hljs-title function_">defineTool</span>({
+  <span class="hljs-attr">name</span>: <span class="hljs-string">&#x27;query_order&#x27;</span>,
+  <span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;根据订单号查询内部系统的订单状态&#x27;</span>,
+  <span class="hljs-attr">input</span>: z.<span class="hljs-title function_">object</span>({
+    <span class="hljs-attr">orderId</span>: z.<span class="hljs-title function_">string</span>().<span class="hljs-title function_">describe</span>(<span class="hljs-string">&#x27;订单号&#x27;</span>),
+  }),
+  <span class="hljs-attr">execute</span>: <span class="hljs-keyword">async</span> ({ orderId }) =&gt; {
+    <span class="hljs-keyword">const</span> res = <span class="hljs-keyword">await</span> <span class="hljs-title function_">fetch</span>(<span class="hljs-string">`https://internal.example.com/api/orders/<span class="hljs-subst">${orderId}</span>`</span>, {
+      <span class="hljs-attr">headers</span>: { <span class="hljs-attr">authorization</span>: <span class="hljs-string">`Bearer <span class="hljs-subst">${process.env.INTERNAL_API_TOKEN}</span>`</span> },
+    })
+    <span class="hljs-keyword">if</span> (!res.<span class="hljs-property">ok</span>) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Error</span>(<span class="hljs-string">`查询失败: <span class="hljs-subst">${res.status}</span>`</span>)
+    <span class="hljs-keyword">return</span> res.<span class="hljs-title function_">json</span>()
+  },
+})
+</code></pre>
+<h3 id="发送通知">发送通知</h3>
+<pre><code class="language-ts"><span class="hljs-keyword">import</span> { defineTool } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;@agentkit/flutter-dev-bff/define&#x27;</span>
+<span class="hljs-keyword">import</span> { z } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;zod&#x27;</span>
+
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">default</span> <span class="hljs-title function_">defineTool</span>({
+  <span class="hljs-attr">name</span>: <span class="hljs-string">&#x27;send_notification&#x27;</span>,
+  <span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;向指定 webhook 发送通知消息&#x27;</span>,
+  <span class="hljs-attr">input</span>: z.<span class="hljs-title function_">object</span>({
+    <span class="hljs-attr">message</span>: z.<span class="hljs-title function_">string</span>().<span class="hljs-title function_">describe</span>(<span class="hljs-string">&#x27;通知内容&#x27;</span>),
+    <span class="hljs-attr">level</span>: z.<span class="hljs-title function_">enum</span>([<span class="hljs-string">&#x27;info&#x27;</span>, <span class="hljs-string">&#x27;warn&#x27;</span>, <span class="hljs-string">&#x27;error&#x27;</span>]).<span class="hljs-title function_">default</span>(<span class="hljs-string">&#x27;info&#x27;</span>),
+  }),
+  <span class="hljs-attr">execute</span>: <span class="hljs-keyword">async</span> ({ message, level }) =&gt; {
+    <span class="hljs-keyword">const</span> webhook = process.<span class="hljs-property">env</span>.<span class="hljs-property">NOTIFICATION_WEBHOOK_URL</span>
+    <span class="hljs-keyword">if</span> (!webhook) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Error</span>(<span class="hljs-string">&#x27;未配置 NOTIFICATION_WEBHOOK_URL&#x27;</span>)
+    <span class="hljs-keyword">await</span> <span class="hljs-title function_">fetch</span>(webhook, {
+      <span class="hljs-attr">method</span>: <span class="hljs-string">&#x27;POST&#x27;</span>,
+      <span class="hljs-attr">headers</span>: { <span class="hljs-string">&#x27;content-type&#x27;</span>: <span class="hljs-string">&#x27;application/json&#x27;</span> },
+      <span class="hljs-attr">body</span>: <span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>({ <span class="hljs-attr">text</span>: <span class="hljs-string">`[<span class="hljs-subst">${level}</span>] <span class="hljs-subst">${message}</span>`</span> }),
+    })
+    <span class="hljs-keyword">return</span> { <span class="hljs-attr">sent</span>: <span class="hljs-literal">true</span> }
+  },
+})
+</code></pre>
+<h3 id="无参数工具">无参数工具</h3>
+<pre><code class="language-ts"><span class="hljs-keyword">import</span> { defineTool } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;@agentkit/flutter-dev-bff/define&#x27;</span>
+<span class="hljs-keyword">import</span> { z } <span class="hljs-keyword">from</span> <span class="hljs-string">&#x27;zod&#x27;</span>
+
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">default</span> <span class="hljs-title function_">defineTool</span>({
+  <span class="hljs-attr">name</span>: <span class="hljs-string">&#x27;get_server_time&#x27;</span>,
+  <span class="hljs-attr">description</span>: <span class="hljs-string">&#x27;获取服务器当前时间&#x27;</span>,
+  <span class="hljs-attr">input</span>: z.<span class="hljs-title function_">object</span>({}),
+  <span class="hljs-attr">execute</span>: <span class="hljs-keyword">async</span> () =&gt; ({ <span class="hljs-attr">time</span>: <span class="hljs-keyword">new</span> <span class="hljs-title class_">Date</span>().<span class="hljs-title function_">toISOString</span>() }),
+})
+</code></pre>
+<h2 id="热重载">热重载</h2>
+<p>BFF 用 <code>fs.watch</code> 监听工具目录：</p>
+<ul>
+<li>新建 <code>.js</code>/<code>.ts</code> 文件 → 自动加载</li>
+<li>修改已有文件 → 重新加载并覆盖旧工具</li>
+<li>删除文件 → 从注册表移除（下次重载生效）</li>
+</ul>
+<p>防抖 300ms，连续保存不会重复触发。</p>
+<p>如果热重载没生效（某些编辑器用 atomic save 会漏事件），重启 BFF 即可。</p>
+<h2 id="故障排查">故障排查</h2>
+<table>
+<thead>
+<tr>
+<th>问题</th>
+<th>原因</th>
+<th>解决</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>日志显示「跳过 xxx：不是合法的 ToolDefinition」</td>
+<td>缺少 name 或 execute</td>
+<td>检查必填字段</td>
+</tr>
+<tr>
+<td>日志显示「加载 xxx 失败」</td>
+<td>语法错误或 import 失败</td>
+<td>看错误信息，用 <code>tsc --noEmit</code> 检查</td>
+</tr>
+<tr>
+<td>工具没出现</td>
+<td>文件后缀不对</td>
+<td>只支持 <code>.js</code>/<code>.ts</code>/<code>.mjs</code>/<code>.cjs</code>，<code>.d.ts</code> 会忽略</td>
+</tr>
+<tr>
+<td>改了没生效</td>
+<td>热重载漏事件</td>
+<td>重启 BFF</td>
+</tr>
+<tr>
+<td>全局工具不加载</td>
+<td><code>~/.agentkit/tools/</code> 不存在</td>
+<td>目录不存在时静默跳过，手动创建</td>
+</tr>
+</tbody>
+</table>
+<h2 id="与-skill-的区别">与 Skill 的区别</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Tool 插件</th>
+<th>Skill</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>目的</td>
+<td>增加新能力</td>
+<td>教 Agent 用现有工具完成特定任务</td>
+</tr>
+<tr>
+<td>形态</td>
+<td>可执行代码</td>
+<td>Prompt 文本</td>
+</tr>
+<tr>
+<td>运行位置</td>
+<td>BFF 进程内</td>
+<td>作为 system prompt 发给 LLM</td>
+</tr>
+<tr>
+<td>适用场景</td>
+<td>调 API、查数据库、业务逻辑</td>
+<td>标准化测试流程、特定 App 的操作步骤</td>
+</tr>
+</tbody>
+</table>
+<p>两者可以配合：Skill 可以引用你写的自定义工具。</p>
+
+            <script async src="https://cdn.jsdelivr.net/npm/katex-copytex@latest/dist/katex-copytex.min.js"></script>
+            
+        </body>
+        </html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Skill &#x7cfb;&#x7edf;</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <span id="markdown-mermaid" aria-hidden="true" data-config="{&quot;darkModeTheme&quot;:&quot;vscode&quot;,&quot;lightModeTheme&quot;:&quot;vscode&quot;,&quot;maxTextSize&quot;:50000,&quot;clickDrag&quot;:&quot;alt&quot;,&quot;showControls&quot;:&quot;onHoverOrFocus&quot;,&quot;resizable&quot;:true,&quot;maxHeight&quot;:&quot;&quot;}"></span>
+				<h1 id="skill-系统">Skill 系统</h1>
+<p>Skill 是可复用的操作流程。你可以用大白话描述想要做什么,LLM 结合可用工具生成一份系统提示词,保存后一键执行,还能根据历史执行记录自动优化。</p>
+<h2 id="快速开始">快速开始</h2>
+<ol>
+<li>点击 header 的「Skills」按钮</li>
+<li>点击「+ 用大白话新建 Skill」</li>
+<li>输入描述,例如:</li>
+</ol>
+<blockquote>
+<p>打开真实场景 Demo,用手机号 13800138000 密码 test123 登录,验证码填 123456,进入第一个订单,打开帮助中心,在 H5 页面用 e2e_user / pass1234 登录</p>
+</blockquote>
+<ol start="4">
+<li>LLM 生成 skill 的名称、描述和提示词</li>
+<li>检查并编辑提示词,确认后保存</li>
+<li>点击「▶ 一键执行」</li>
+</ol>
+<h2 id="工作原理">工作原理</h2>
+<p>Skill 本质上是一段 system prompt。执行时,BFF 把它替换默认的 free-form prompt 发给 LLM,LLM 据此调用工具完成任务。</p>
+<p>每个 Skill 保存在 <code>skills/&lt;slug&gt;/</code> 目录:</p>
+<pre><code>skills/login-and-check-h5/
+├── skill.yaml    # 元数据(名称、描述、版本、工具列表)
+├── prompt.md     # 系统提示词
+└── runs/         # 执行记录
+    ├── 1724xxx.json
+    └── 1724yyy.json
+</code></pre>
+<h2 id="skill-管理">Skill 管理</h2>
+<h3 id="列表与详情">列表与详情</h3>
+<ul>
+<li>「Skills」面板的「Skills」标签页列出所有已保存的 Skill</li>
+<li>点击卡片查看详情:提示词、版本、使用的工具、执行历史</li>
+<li>详情页有三个按钮:
+<ul>
+<li><strong>▶ 一键执行</strong> — 开始运行</li>
+<li><strong>⟳ 优化 Skill</strong> — 根据历史记录让 LLM 改进提示词</li>
+<li><strong>删除 Skill</strong> — 不可恢复</li>
+</ul>
+</li>
+</ul>
+<h3 id="历史记录">历史记录</h3>
+<ul>
+<li>「Skills」面板的「历史」标签页列出所有执行记录(跨 Skill,按时间倒序)</li>
+<li>每条记录显示状态(成功/失败/已停止)、时间、摘要</li>
+<li>点击跳转到对应 Skill 的详情</li>
+</ul>
+<h2 id="优化-skill">优化 Skill</h2>
+<p>Skill 详情页点「⟳ 优化 Skill」:</p>
+<ol>
+<li>BFF 读取该 Skill 的所有执行记录</li>
+<li>LLM 分析成功和失败模式</li>
+<li>生成改进后的提示词和新版本号(如 1.0.0 → 1.1.0)</li>
+<li>弹窗显示分析说明和新提示词,你确认后保存</li>
+</ol>
+<p>优化后的提示词覆盖 <code>prompt.md</code>,版本号更新到 <code>skill.yaml</code>。旧版本不保留(git 可追溯)。</p>
+<h2 id="编写高质量的-skill-描述">编写高质量的 Skill 描述</h2>
+<p>描述越具体,生成的提示词质量越高。好的描述包含:</p>
+<ul>
+<li><strong>起点</strong>:从哪个页面/状态开始</li>
+<li><strong>步骤</strong>:每一步做什么、输入什么数据</li>
+<li><strong>预期结果</strong>:完成后应该看到什么</li>
+<li><strong>异常处理</strong>:遇到错误怎么办</li>
+</ul>
+<p>差的描述:</p>
+<blockquote>
+<p>帮我登录一下</p>
+</blockquote>
+<p>好的描述:</p>
+<blockquote>
+<p>启动应用,用 13800138000 / test123 登录,验证码填 123456。如果提示网络错误就重试一次。登录成功后应该看到「我的」tab。</p>
+</blockquote>
+<h2 id="skill-与自定义工具的区别">Skill 与自定义工具的区别</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Skill</th>
+<th>Tool 插件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>形态</td>
+<td>Prompt 文本</td>
+<td>可执行 JS/TS 代码</td>
+</tr>
+<tr>
+<td>用途</td>
+<td>教 Agent 完成特定流程</td>
+<td>给 Agent 增加新能力</td>
+</tr>
+<tr>
+<td>运行</td>
+<td>作为 system prompt 发给 LLM</td>
+<td>在 BFF 进程内执行</td>
+</tr>
+<tr>
+<td>适合</td>
+<td>标准化测试流程、操作步骤</td>
+<td>调 API、查数据库、业务逻辑</td>
+</tr>
+</tbody>
+</table>
+<p>两者可以配合使用——Skill 可以调用你写的自定义工具。详见 <a href="custom-tools.html">自定义工具</a>。</p>
+
+            
+            
+        </body>
+        </html>

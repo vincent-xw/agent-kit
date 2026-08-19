@@ -202,11 +202,11 @@ const docsContent = document.getElementById('docs-content');
 document.getElementById('docs-btn').addEventListener('click', async () => {
   docsOverlay.classList.add('open');
   if (docsContent.dataset.loaded === '1') return;
-  // 默认加载 custom-tools.html（由 Markdown 插件从 docs/custom-tools.md 生成）
-  // 其他文档：docs/index.md、tools.md、skills.md、settings.md、companion.md
-  docsContent.innerHTML = '加载中…';
-  try {
-    const res = await fetch('custom-tools.html');
+  // 默认加载 guide.html（由 Markdown 插件从 docs/guide.md 生成）
+    // 其他文档：tools.md、skills.md、settings.md、companion.md、custom-tools.md
+    docsContent.innerHTML = '加载中…';
+    try {
+      const res = await fetch('guide.html');
     if (res.ok) {
       docsContent.innerHTML = await res.text();
       docsContent.dataset.loaded = '1';
