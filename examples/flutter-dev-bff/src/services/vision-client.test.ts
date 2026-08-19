@@ -25,7 +25,7 @@ describe('VisionClient', () => {
     const call = fetchMock.mock.calls[0]! as unknown as [string, { body: string }]
     const body = JSON.parse(call[1]!.body)
     expect(body.model).toBe('qwen-vl')
-    expect(body.max_tokens).toBe(500)
+    expect(body.max_tokens).toBe(4096)
     expect(body.messages[0].role).toBe('user')
     expect(body.messages[0].content[0].type).toBe('text')
     expect(body.messages[0].content[1].type).toBe('image_url')

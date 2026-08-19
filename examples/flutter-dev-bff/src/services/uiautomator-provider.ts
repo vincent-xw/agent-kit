@@ -94,20 +94,48 @@ function isInteresting(node: RawNode): boolean {
 
 const MAX_NODES = 200
 
+/** 操作后等待 UI 稳定的基础时间（毫秒）。 */
+const STABLE_WAIT_MS = 500
+/** snapshot 检测到包名变化时的重试等待（毫秒）。 */
+const RETRY_WAIT_MS = 1500
+
+/** 简单 sleep。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export class UiAutomatorDumpProvider implements SnapshotProvider {
   private currentNodes = new Map<number, DeviceNode>()
+  private lastPackageName = ''
+  private lastSnapshotAt = 0
 
   constructor(private readonly adb: AdbClient) {}
 
   async snapshot(): Promise<DeviceSnapshot> {
-    const xml = await this.adb.dumpUiHierarchy()
-    const rawNodes = parseHierarchyXml(xml)
+    // 首次调用不等待；后续调用距离上次操作不到 STABLE_WAIT_MS 时，补一个短等待，
+    // 让点击/按键后的页面切换动画和无障碍树更新完成。
+    const sinceLast = Date.now() - this.lastSnapshotAt
+    if (this.lastSnapshotAt > 0 && sinceLast < STABLE_WAIT_MS) {
+      await sleep(STABLE_WAIT_MS - sinceLast)
+    }
 
-    let packageName = ''
-    let screenWidth = 0
-    let screenHeight = 0
+    let xml = await this.adb.dumpUiHierarchy()
+    let rawNodes = parseHierarchyXml(xml)
+    let packageName = rawNodes.find((n) => n.packageName)?.packageName ?? ''
+
+    // 如果包名和上次不同（说明刚发生页面跳转），再等一会儿重试一次，
+    // 避免抓到跳转过程中的中间帧。
+    if (this.lastPackageName && packageName && packageName !== this.lastPackageName) {
+      await sleep(RETRY_WAIT_MS)
+      xml = await this.adb.dumpUiHierarchy()
+      rawNodes = parseHierarchyXml(xml)
+      const secondPkg = rawNodes.find((n) => n.packageName)?.packageName ?? ''
+      if (secondPkg) packageName = secondPkg
+    }
     const interesting = rawNodes.filter(isInteresting)
 
+    let screenWidth = 0
+    let screenHeight = 0
     this.currentNodes.clear()
     const nodes: DeviceNode[] = []
     let ref = 1
@@ -139,7 +167,7 @@ export class UiAutomatorDumpProvider implements SnapshotProvider {
       ref += 1
     }
 
-    return {
+    const result: DeviceSnapshot = {
       snapshotId: `snap-${Date.now()}`,
       packageName,
       screenWidth,
@@ -149,6 +177,14 @@ export class UiAutomatorDumpProvider implements SnapshotProvider {
         ? { truncated: interesting.length - nodes.length }
         : {}),
     }
+    this.trackSnapshot(packageName)
+    return result
+  }
+
+  // 记录最后一次 snapshot 的包名和时间，供下次 snapshot 判断页面是否切换
+  private trackSnapshot(packageName: string): void {
+    this.lastPackageName = packageName
+    this.lastSnapshotAt = Date.now()
   }
 
   async tapNode(ref: number): Promise<{ ok: boolean; message: string }> {

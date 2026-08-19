@@ -281,6 +281,8 @@ function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
       async execute(raw) {
         const { key, deviceSerial } = raw as { key: AndroidKey; deviceSerial?: string }
         await svc.adb.pressKey(key, deviceSerial)
+        // 按键（尤其是 back/home）会触发页面切换动画，短暂等待让无障碍树更新
+        await new Promise((r) => setTimeout(r, 300))
         return { ok: true, message: `已发送按键 ${key}` }
       },
     },
