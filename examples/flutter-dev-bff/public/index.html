@@ -476,6 +476,21 @@ function connectEvents() {
     if (!running) statusEl.textContent = '就绪';
   };
 
+  // LLM 流式输出：逐字追加到当前助手消息
+  let streamingText = '';
+  es.addEventListener('llm_delta', (e) => {
+    if (!currentTypingEl) return;
+    const data = JSON.parse(e.data);
+    if (data.content) {
+      streamingText += data.content;
+      currentTypingEl.innerHTML = formatContent(streamingText);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    if (data.done) {
+      streamingText = '';
+    }
+  });
+
   return es;
 }
 

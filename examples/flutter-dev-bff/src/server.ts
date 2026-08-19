@@ -133,6 +133,9 @@ export function createFlutterDevBff(options: {
           },
         }
       : {}),
+    llmDelta: (delta) => {
+      bus.emit({ type: 'llm_delta', ...delta })
+    },
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
   for (const tool of instrumentTools(toolDefinitions, bus)) runtime.tools.register(tool)
@@ -271,7 +274,7 @@ export function createFlutterDevBff(options: {
     const lastEventId = c.req.header('last-event-id')
     const fromSeq = lastEventId !== undefined ? Number(lastEventId) : undefined
 
-    return streamSSE(c, async (stream) => {
+    return streamSSE(c as unknown as Parameters<typeof streamSSE>[0], async (stream) => {
       const queue: FlutterEvent[] = []
       const unsubscribe = bus.subscribe((event) => queue.push(event), fromSeq)
       stream.onAbort(unsubscribe)
