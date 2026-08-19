@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
+    },
+    "./define": {
+      "types": "./dist/define-tool.d.ts",
+      "import": "./dist/define-tool.js"
     }
   },
   "files": [
