@@ -68,25 +68,6 @@
   #skills-btn:hover { border-color: var(--accent); color: var(--accent); }
   #docs-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 16px; cursor: pointer; line-height: 1.2; }
   #docs-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #docs-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: center; padding: 40px 20px; }
-  #docs-overlay.open { display: flex; }
-  #docs-panel { width: 100%; max-width: 900px; max-height: calc(100vh - 80px); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-  #docs-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
-  #docs-panel-header h2 { font-size: 16px; }
-  #docs-panel-header button { background: none; border: none; color: var(--text2); font-size: 24px; cursor: pointer; }
-  #docs-content { padding: 24px; overflow-y: auto; line-height: 1.7; font-size: 14px; }
-  #docs-content h1 { font-size: 22px; margin: 0 0 16px; }
-  #docs-content h2 { font-size: 17px; margin: 24px 0 10px; }
-  #docs-content h3 { font-size: 15px; margin: 16px 0 8px; }
-  #docs-content p { margin: 8px 0; }
-  #docs-content code { background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 3px; font-family: 'SF Mono', monospace; font-size: 13px; }
-  #docs-content pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; }
-  #docs-content pre code { background: none; padding: 0; }
-  #docs-content table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  #docs-content th, #docs-content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; font-size: 13px; }
-  #docs-content th { background: var(--tool-bg); }
-  #docs-content ul, #docs-content ol { padding-left: 24px; margin: 8px 0; }
-  #docs-content li { margin: 4px 0; }
   #new-session-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 16px; cursor: pointer; line-height: 1.2; }
   #new-session-btn:hover { border-color: var(--accent2); color: var(--accent2); }
   #skills-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
@@ -146,17 +127,6 @@
   <button id="settings-btn" title="设置">⚙</button>
 </header>
 
-<!-- 文档面板 -->
-<div id="docs-overlay">
-  <div id="docs-panel">
-    <div id="docs-panel-header">
-      <h2>使用指南</h2>
-      <button id="docs-close">×</button>
-    </div>
-    <div id="docs-content">加载中…</div>
-  </div>
-</div>
-
 <!-- Skills 面板 -->
 <div id="skills-overlay">
   <div id="skills-panel">
@@ -196,30 +166,9 @@ let sessionId = localStorage.getItem('flutter_session_id') || ('sess-' + Date.no
 localStorage.setItem('flutter_session_id', sessionId);
 let running = false;
 
-// ── 文档面板 ──
-const docsOverlay = document.getElementById('docs-overlay');
-const docsContent = document.getElementById('docs-content');
-document.getElementById('docs-btn').addEventListener('click', async () => {
-  docsOverlay.classList.add('open');
-  if (docsContent.dataset.loaded === '1') return;
-  // 默认加载 guide.html（由 Markdown 插件从 docs/guide.md 生成）
-    // 其他文档：tools.md、skills.md、settings.md、companion.md、custom-tools.md
-    docsContent.innerHTML = '加载中…';
-    try {
-      const res = await fetch('guide.html');
-    if (res.ok) {
-      docsContent.innerHTML = await res.text();
-      docsContent.dataset.loaded = '1';
-    } else {
-      docsContent.innerHTML = '<p style="color:var(--text2)">文档未找到。请用 Markdown 转 HTML 插件将 docs/*.md 转为 public/*.html。</p>';
-    }
-  } catch (e) {
-    docsContent.innerHTML = `<p style="color:var(--error)">加载失败：${escapeHtml(e.message)}</p>`;
-  }
-});
-document.getElementById('docs-close').addEventListener('click', () => docsOverlay.classList.remove('open'));
-docsOverlay.addEventListener('click', (e) => {
-  if (e.target === docsOverlay) docsOverlay.classList.remove('open');
+// ── 文档按钮：新标签页打开 ──
+document.getElementById('docs-btn').addEventListener('click', () => {
+  window.open('guide.html', '_blank', 'noopener');
 });
 
 // ── 设置 ──
