@@ -9,7 +9,7 @@ afterEach(() => {
 })
 
 async function start() {
-  const bff = createFlutterDevBff({
+  const bff = await createFlutterDevBff({
     masterKey,
     apiToken: 'token-1',
     flutterProjectPath: '/tmp/flutter-app',

@@ -43,6 +43,8 @@ import { VmServiceClient } from './services/vm-service-client.js'
 import { ScreenshotStore } from './services/screenshot-store.js'
 import { createEventBus } from './services/event-bus.js'
 import { CdpClient } from './services/webview/cdp-client.js'
+import { ToolLoader } from './services/tool-loader.js'
+import { homedir } from 'node:os'
 import { VisionClient } from './services/vision-client.js'
 import type { VisionClientConfig } from './services/vision-client.js'
 import { SkillStore } from './services/skill-store.js'
@@ -50,7 +52,7 @@ import { generateSkill, optimizeSkill } from './services/skill-generator.js'
 import type { FlutterEvent } from './services/event-bus.js'
 import { instrumentTools, llmTraceToBus } from './tool-events.js'
 
-export function createFlutterDevBff(options: {
+export async function createFlutterDevBff(options: {
   masterKey: string
   apiToken: string
   flutterProjectPath: string
@@ -81,6 +83,15 @@ export function createFlutterDevBff(options: {
   const screenshots = new ScreenshotStore(screenshotDir)
   const skillStore = new SkillStore(skillsDir)
 
+  // 加载用户自定义工具插件：全局 ~/.agentkit/tools + 项目 ./tools
+  const globalToolsDir = join(homedir(), '.agentkit', 'tools')
+  const projectToolsDir = join(process.cwd(), 'tools')
+  const toolLoader = new ToolLoader({ globalDir: globalToolsDir, projectDir: projectToolsDir })
+  const pluginTools = await toolLoader.loadAll()
+  if (pluginTools.length > 0) {
+    audit.log?.({ requestId: `tool-loader-${Date.now()}`, durationMs: 0, toolName: pluginTools.map((t) => t.name).join(',') })
+  }
+
   let vmClient: VmServiceClient | null = null
 
   const toolDefinitions = createFlutterToolDefinitions({
@@ -105,6 +116,10 @@ export function createFlutterDevBff(options: {
     webView,
     ...(options.vision ? { vision: new VisionClient(options.vision) } : {}),
   })
+
+  // 插件工具与内置工具合并，同名以插件为准（Map 去重）
+  let finalTools = new Map([...toolDefinitions, ...pluginTools].map((t) => [t.name, t]))
+  const finalToolList = [...finalTools.values()]
 
   const bus = createEventBus()
 
@@ -138,7 +153,7 @@ export function createFlutterDevBff(options: {
     },
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
   })
-  for (const tool of instrumentTools(toolDefinitions, bus)) runtime.tools.register(tool)
+  for (const tool of instrumentTools(finalToolList, bus)) runtime.tools.register(tool)
 
   // Skill 生成用的 LLM 客户端：每次调用前从 secrets 读取最新密钥。
   const skillLlm: LlmClient = {
@@ -197,7 +212,7 @@ export function createFlutterDevBff(options: {
     const intent = typeof body?.intent === 'string' ? body.intent.trim() : ''
     if (!intent) return c.json({ error: 'intent is required' }, 400)
     try {
-      const generated = await generateSkill(skillLlm, toolDefinitions, intent)
+      const generated = await generateSkill(skillLlm, finalToolList, intent)
       return c.json(generated)
     } catch (e) {
       return c.json({ error: (e as Error).message }, 500)
@@ -235,7 +250,7 @@ export function createFlutterDevBff(options: {
       const slug = c.req.param('slug')
       const skill = skillStore.get(slug)
       if (!skill) return c.json({ error: 'not found' }, 404)
-      const result = await optimizeSkill(skillLlm, toolDefinitions, skill.prompt, skill.runs, skill.meta.version)
+      const result = await optimizeSkill(skillLlm, finalToolList, skill.prompt, skill.runs, skill.meta.version)
       return c.json(result)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -303,7 +318,7 @@ export function createFlutterDevBff(options: {
   })
 
   const ready = seedSecret(runtime, options.llm)
-  return { app, runtime, database, prompts, adb, flutter, bus, ready }
+  return { app, runtime, database, prompts, adb, flutter, bus, toolLoader, ready }
 }
 
 export function startFlutterDevBffServer(
@@ -420,7 +435,7 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
       : undefined
   if (vision) console.log(`[flutter-bff] 视觉模型已配置: ${vision.model}`)
 
-  const bff = createFlutterDevBff({
+  const bff = await createFlutterDevBff({
     masterKey,
     apiToken,
     flutterProjectPath: projectPath,

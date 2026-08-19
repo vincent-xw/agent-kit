@@ -19,7 +19,7 @@ async function startWithScreenshot(): Promise<{ port: number; png: Buffer }> {
   const png = Buffer.from(PNG_BASE64, 'base64')
   await writeFile(join(dir, 'shot-test1.png'), png)
 
-  const bff = createFlutterDevBff({
+  const bff = await createFlutterDevBff({
     masterKey,
     apiToken: 'token-1',
     flutterProjectPath: '/tmp/flutter-app',
@@ -62,7 +62,7 @@ describe('flutter-dev-bff HTTP 桥接', () => {
   })
 
   it('只绑定 loopback，不监听全部网卡', async () => {
-    const bff = createFlutterDevBff({
+    const bff = await createFlutterDevBff({
       masterKey,
       apiToken: 'token-1',
       flutterProjectPath: '/tmp/flutter-app',

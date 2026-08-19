@@ -15,12 +15,11 @@ describe('ToolLoader', () => {
     rmSync(tmp, { recursive: true, force: true })
   })
 
-  it('加载 .js 插件文件', async () => {
-    writeFileSync(join(tmp, 'hello.js'), `
+  it('加载 .mjs 插件文件', async () => {
+    writeFileSync(join(tmp, 'hello.mjs'), `
       export default {
         name: 'say_hello',
         description: 'say hi',
-        input: { parse: (v) => v },
         execute: async () => ({ ok: true, message: 'hi' }),
       }
     `)
@@ -43,19 +42,19 @@ describe('ToolLoader', () => {
     const loader = new ToolLoader({ projectDir: tmp })
     const tools = await loader.loadAll()
     expect(tools[0]!.name).toBe('query_weather')
-    const result = await tools[0]!.execute({ city: '杭州' })
+    const result = await (tools[0]!.execute as (input: unknown) => Promise<unknown>)({ city: '杭州' })
     expect(result).toEqual({ city: '杭州', temp: 25 })
   })
 
   it('跳过没有默认导出的文件', async () => {
-    writeFileSync(join(tmp, 'bad.js'), `export const x = 1`)
+    writeFileSync(join(tmp, 'bad.mjs'), `export const x = 1`)
     const loader = new ToolLoader({ projectDir: tmp })
     const tools = await loader.loadAll()
     expect(tools).toHaveLength(0)
   })
 
   it('跳过缺少 name 或 execute 的非法插件', async () => {
-    writeFileSync(join(tmp, 'bad.js'), `export default { description: 'no name' }`)
+    writeFileSync(join(tmp, 'bad.mjs'), `export default { description: 'no name' }`)
     const loader = new ToolLoader({ projectDir: tmp })
     const tools = await loader.loadAll()
     expect(tools).toHaveLength(0)
@@ -64,16 +63,16 @@ describe('ToolLoader', () => {
   it('项目级工具覆盖全局级同名工具', async () => {
     const global = mkdtempSync(join(tmpdir(), 'gtools-'))
     mkdirSync(global, { recursive: true })
-    writeFileSync(join(global, 'same.js'), `
-      export default { name: 'same', description: 'global', input:{parse:v=>v}, execute: async () => 'global' }
+    writeFileSync(join(global, 'same.mjs'), `
+      export default { name: 'same', description: 'global', execute: async () => 'global' }
     `)
-    writeFileSync(join(tmp, 'same.js'), `
-      export default { name: 'same', description: 'project', input:{parse:v=>v}, execute: async () => 'project' }
+    writeFileSync(join(tmp, 'same.mjs'), `
+      export default { name: 'same', description: 'project', execute: async () => 'project' }
     `)
     const loader = new ToolLoader({ globalDir: global, projectDir: tmp })
     const tools = await loader.loadAll()
     expect(tools).toHaveLength(1)
-    expect(await tools[0]!.execute({})).toBe('project')
+    expect(await (tools[0]!.execute as (input: unknown) => Promise<unknown>)({})).toBe('project')
     rmSync(global, { recursive: true, force: true })
   })
 

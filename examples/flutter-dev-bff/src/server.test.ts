@@ -7,7 +7,7 @@ const masterKey = 'A'.repeat(43)
 const llm = { apiKey: 'sk-test', baseUrl: 'https://llm.example.test/v1', model: 'test-model' }
 
 async function bff(options: { withLlm?: boolean; projectPath?: string } = {}) {
-  const instance = createFlutterDevBff({
+  const instance = await createFlutterDevBff({
     masterKey,
     apiToken: 'token-1',
     flutterProjectPath: options.projectPath ?? '/tmp/flutter-app',
