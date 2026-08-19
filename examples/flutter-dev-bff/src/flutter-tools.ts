@@ -251,11 +251,15 @@ function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
         observed: z.string(),
       }),
       timeoutMs: 35_000,
-      async execute(raw) {
+      async execute(raw, context) {
         const { text, timeoutMs = 10_000 } = raw as { text: string; timeoutMs?: number }
         const start = Date.now()
         const interval = 800
         while (Date.now() - start < timeoutMs) {
+          // 响应 harness 取消：否则工具级 timeoutMs abort 后循环仍继续跑满整个超时
+          if (context.signal.aborted) {
+            return { satisfied: false, waitedMs: Date.now() - start, observed: `已中断（未找到包含「${text}」的节点）` }
+          }
           const snapshot = await svc.device.snapshot()
           const found = snapshot.nodes.some(
             (n) => n.text?.includes(text) || n.contentDescription?.includes(text),

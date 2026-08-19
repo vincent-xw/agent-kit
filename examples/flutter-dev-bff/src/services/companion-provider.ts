@@ -33,7 +33,8 @@ export class CompanionProvider implements SnapshotProvider {
 
   async snapshot(): Promise<DeviceSnapshot> {
     await this.ensureForward()
-    const res = await fetch(`${this.baseUrl}/tree`)
+    // 必须带超时：fetch 默认无限等待，若 Companion 服务器卡住（忙碌/异常）会挂死
+    const res = await fetch(`${this.baseUrl}/tree`, { signal: AbortSignal.timeout(10_000) })
     if (!res.ok) throw new Error(`Companion /tree 返回 ${res.status}`)
     const data = (await res.json()) as {
       snapshotId: string
@@ -62,7 +63,10 @@ export class CompanionProvider implements SnapshotProvider {
 
   async tapNode(ref: number): Promise<{ ok: boolean; message: string }> {
     await this.ensureForward()
-    const res = await fetch(`${this.baseUrl}/node/${ref}/click`, { method: 'POST' })
+    const res = await fetch(`${this.baseUrl}/node/${ref}/click`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10_000),
+    })
     return res.json() as Promise<{ ok: boolean; message: string }>
   }
 
@@ -72,6 +76,7 @@ export class CompanionProvider implements SnapshotProvider {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10_000),
     })
     return res.json() as Promise<{ ok: boolean; message: string }>
   }
@@ -82,6 +87,7 @@ export class CompanionProvider implements SnapshotProvider {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ direction }),
+      signal: AbortSignal.timeout(10_000),
     })
     return res.json() as Promise<{ ok: boolean; message: string }>
   }
