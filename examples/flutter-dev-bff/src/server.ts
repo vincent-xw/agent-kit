@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, existsSync, writeFileSync, statSync } from 'node:fs'
-import { dirname, join, extname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 function getProgramDir(): string {
@@ -197,28 +197,16 @@ export async function createFlutterDevBff(options: {
     return c.html(readFileSync(htmlPath, 'utf-8'))
   })
 
-  // 静态文件服务（文档 HTML、截图等 public/ 下的资源）
-  app.get('/*', (c) => {
-    const urlPath = c.req.path
-    // API 和 SSE 路由不走静态文件
-    if (urlPath.startsWith('/api/') || urlPath.startsWith('/v1/')) return c.notFound()
-    const filePath = join(publicDir, urlPath)
-    // 防止路径穿越
-    if (!filePath.startsWith(publicDir)) return c.notFound()
-    if (!existsSync(filePath)) return c.notFound()
-    const ext = extname(filePath).toLowerCase()
-    const mimeTypes: Record<string, string> = {
-      '.html': 'text/html; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.js': 'application/javascript; charset=utf-8',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.svg': 'image/svg+xml',
-      '.json': 'application/json',
-    }
-    c.header('content-type', mimeTypes[ext] ?? 'application/octet-stream')
-    return c.body(readFileSync(filePath))
-  })
+  // 文档页面（由 Markdown 插件转换生成，放在 public/ 下）
+  const DOC_PAGES = ['guide', 'tools', 'skills', 'settings', 'companion', 'custom-tools']
+  for (const page of DOC_PAGES) {
+    app.get(`/${page}.html`, (c) => {
+      const filePath = join(publicDir, `${page}.html`)
+      if (!existsSync(filePath)) return c.notFound()
+      c.header('content-type', 'text/html; charset=utf-8')
+      return c.body(readFileSync(filePath))
+    })
+  }
 
   app.get('/api/sessions/:sessionId/messages', (c) => {
     const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
