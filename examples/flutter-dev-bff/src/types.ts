@@ -31,6 +31,8 @@ export interface DeviceSnapshot {
   screenHeight: number
   nodes: DeviceNode[]
   truncated?: number
+  /** 快照来源：uiautomator 或 companion */
+  source: 'uiautomator' | 'companion' | 'webview'
 }
 
 export interface FlutterLogEntry {

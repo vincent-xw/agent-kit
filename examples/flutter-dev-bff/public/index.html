@@ -24,6 +24,8 @@
   .msg.tool { align-self: flex-start; background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px 12px; font-size: 13px; max-width: 90%; }
   .msg.tool .tool-name { font-weight: 600; color: var(--accent); }
   .msg.tool .tool-status { color: var(--text2); font-size: 12px; }
+  .source-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; margin: 0 6px; background: var(--border); color: var(--text2); vertical-align: middle; }
+  .source-badge.companion { background: var(--accent2); color: var(--bg); }
   .msg.tool .tool-output { margin-top: 6px; color: var(--text2); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
   .msg.error { border-color: var(--error); color: var(--error); }
   .msg img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
@@ -541,13 +543,22 @@ function connectEvents() {
     const el = toolEls.get(data.name);
     const status = data.ok ? `完成 ${data.durationMs}ms` : `失败 ${data.durationMs}ms`;
     const detail = data.ok ? data.output : data.error;
+    // 从输出里提取 source，用于显示快照来源徽标
+    let sourceBadge = '';
+    if (data.name === 'mobile_snapshot' && data.ok && typeof data.output === 'string') {
+      try {
+        const parsed = JSON.parse(data.output);
+        if (parsed.source === 'companion') sourceBadge = '<span class="source-badge companion">Companion</span>';
+        else if (parsed.source === 'uiautomator') sourceBadge = '<span class="source-badge">uiautomator</span>';
+      } catch { /* 输出可能被截断，忽略 */ }
+    }
     if (el) {
       el.className = 'msg tool' + (data.ok ? '' : ' error') + (showToolDetails ? '' : ' compact');
-      el.innerHTML = `<div><span class="tool-name">${escapeHtml(data.name)}</span> <span class="tool-status">${escapeHtml(status)}</span></div>`
+      el.innerHTML = `<div><span class="tool-name">${escapeHtml(data.name)}</span> ${sourceBadge}<span class="tool-status">${escapeHtml(status)}</span></div>`
         + (detail ? `<div class="tool-output">${escapeHtml(String(detail).slice(0, 500))}</div>` : '');
       toolEls.delete(data.name);
     } else {
-      addToolMessage(data.name, status, detail, currentTypingEl);
+      addToolMessage(data.name, status, detail, currentTypingEl, sourceBadge);
     }
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
@@ -618,10 +629,10 @@ function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function addToolMessage(toolName, status, output, beforeEl) {
+function addToolMessage(toolName, status, output, beforeEl, sourceBadge) {
   const div = document.createElement('div');
   div.className = 'msg tool' + (showToolDetails ? '' : ' compact');
-  let html = `<div><span class="tool-name">${escapeHtml(toolName)}</span> <span class="tool-status">${escapeHtml(status)}</span></div>`;
+  let html = `<div><span class="tool-name">${escapeHtml(toolName)}</span> ${sourceBadge || ''}<span class="tool-status">${escapeHtml(status)}</span></div>`;
   if (output) {
     const display = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
     html += `<div class="tool-output">${escapeHtml(display.slice(0, 500))}${display.length > 500 ? '...' : ''}</div>`;

@@ -27,7 +27,7 @@ const mockServices: FlutterToolServices = {
     listWebViewSockets: async () => [],
   } as unknown as AdbClient,
   device: {
-    snapshot: async () => ({ snapshotId: 'test', packageName: 'com.test', screenWidth: 1080, screenHeight: 1920, nodes: [] }),
+    snapshot: async () => ({ snapshotId: 'test', packageName: 'com.test', screenWidth: 1080, screenHeight: 1920, nodes: [], source: 'uiautomator' }),
     tapNode: async () => ({ ok: true, message: '' }),
     setText: async () => ({ ok: true, message: '' }),
     scrollNode: async () => ({ ok: true, message: '' }),
@@ -55,7 +55,7 @@ const mockServices: FlutterToolServices = {
   projectPath: '/tmp/flutter-app',
   webView: {
     isAvailable: async () => false,
-    snapshot: async () => ({ snapshotId: 'w', packageName: 'webview', screenWidth: 0, screenHeight: 0, nodes: [] }),
+    snapshot: async () => ({ snapshotId: 'w', packageName: 'webview', screenWidth: 0, screenHeight: 0, nodes: [], source: 'webview' }),
     tap: async () => {},
     setText: async () => {},
     scroll: async () => {},

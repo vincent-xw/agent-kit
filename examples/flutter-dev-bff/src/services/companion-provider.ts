@@ -58,7 +58,7 @@ export class CompanionProvider implements SnapshotProvider {
         selected?: boolean
       }>
     }
-    return data as DeviceSnapshot
+    return { ...data, source: 'companion' as const }
   }
 
   async tapNode(ref: number): Promise<{ ok: boolean; message: string }> {

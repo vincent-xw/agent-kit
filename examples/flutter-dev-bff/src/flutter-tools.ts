@@ -178,7 +178,7 @@ function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
       name: 'mobile_snapshot',
       execution: 'server',
       description:
-        '获取当前屏幕的节点树（无障碍树），返回所有可交互节点和有文本的节点。这是所有 UI 操作的起点：先快照看清屏幕内容，再用 ref 指定目标。UI 变化后必须重新快照。',
+        '获取当前屏幕的节点树（无障碍树），返回所有可交互节点和有文本的节点。source 字段标注数据来源：companion 表示通过无障碍服务 App 实时读取，uiautomator 表示通过 uiautomator dump 获取。这是所有 UI 操作的起点：先快照看清屏幕内容，再用 ref 指定目标。UI 变化后必须重新快照。',
       input: z.object({}),
       output: z.object({
         snapshotId: z.string(),
@@ -187,6 +187,7 @@ function createAccessibilityTools(svc: FlutterToolServices): ToolDefinition[] {
         screenHeight: z.number(),
         nodes: z.array(nodeSchema),
         truncated: z.number().optional(),
+        source: z.enum(['uiautomator', 'companion']),
       }),
       timeoutMs: 30_000,
       async execute() {
@@ -356,6 +357,7 @@ function createWebTools(svc: FlutterToolServices): ToolDefinition[] {
         screenWidth: z.number(),
         screenHeight: z.number(),
         nodes: z.array(nodeSchema),
+        source: z.literal('webview'),
       }),
       timeoutMs: 15_000,
       async execute() {

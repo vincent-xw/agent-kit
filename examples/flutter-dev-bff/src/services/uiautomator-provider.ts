@@ -173,6 +173,7 @@ export class UiAutomatorDumpProvider implements SnapshotProvider {
       screenWidth,
       screenHeight,
       nodes,
+      source: 'uiautomator',
       ...(nodes.length < interesting.length
         ? { truncated: interesting.length - nodes.length }
         : {}),

@@ -143,6 +143,7 @@ export class CdpClient {
       screenWidth: 0,
       screenHeight: 0,
       nodes,
+      source: 'webview',
     }
   }
 
