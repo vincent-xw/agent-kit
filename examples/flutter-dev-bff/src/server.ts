@@ -155,6 +155,22 @@ export async function createFlutterDevBff(options: {
   })
   for (const tool of instrumentTools(finalToolList, bus)) runtime.tools.register(tool)
 
+  // 工具热重载：tools/ 目录变化时更新 runtime
+  const stopWatchingTools = toolLoader.watch(async (newTools) => {
+    try {
+      const merged = new Map([...finalToolList, ...newTools].map((t) => [t.name, t]))
+      for (const tool of merged.values()) {
+        runtime.tools.register(tool)
+      }
+      finalTools = merged
+      bus.emit({ type: 'tools_reloaded', count: merged.size } as unknown as FlutterEvent)
+    } catch (error) {
+      audit.log?.({ requestId: `tool-loader-${Date.now()}`, durationMs: 0, errorCode: error instanceof Error ? error.message : String(error) })
+    }
+  })
+  process.once('SIGTERM', stopWatchingTools)
+  process.once('SIGINT', stopWatchingTools)
+
   // Skill 生成用的 LLM 客户端：每次调用前从 secrets 读取最新密钥。
   const skillLlm: LlmClient = {
     complete: async (request) => {

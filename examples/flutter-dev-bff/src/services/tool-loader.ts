@@ -1,5 +1,5 @@
 import { readdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, watch as fsWatch, type FSWatcher } from 'node:fs'
 import { join, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ToolDefinition } from '@agent-kit/core'
@@ -74,5 +74,47 @@ export class ToolLoader {
       }
     }
     return tools
+  }
+
+  private watchers: FSWatcher[] = []
+
+  /**
+   * 监听工具目录变化，防抖后重新加载并调用 onChange。
+   * 返回取消监听函数。
+   */
+  watch(onChange: (tools: ToolDefinition[]) => void): () => void {
+    const dirs = [this.options.globalDir, this.options.projectDir].filter(
+      (d): d is string => !!d && existsSync(d),
+    )
+    let timer: NodeJS.Timeout | null = null
+    const reload = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(async () => {
+        try {
+          const tools = await this.loadAll()
+          onChange(tools)
+        } catch (error) {
+          console.warn('[tool-loader] 热重载失败：', error instanceof Error ? error.message : error)
+        }
+      }, 300)
+    }
+    for (const dir of dirs) {
+      try {
+        const w = fsWatch(dir, { recursive: false }, (event: string, filename: string | null) => {
+          if (!filename) return
+          if (!PLUGIN_EXTENSIONS.has(extname(filename)) || filename.endsWith('.d.ts')) return
+          reload()
+        })
+        this.watchers.push(w)
+      } catch (error) {
+        console.warn(`[tool-loader] 监听 ${dir} 失败：`, error instanceof Error ? error.message : error)
+      }
+    }
+    return () => this.stopWatching()
+  }
+
+  stopWatching(): void {
+    for (const w of this.watchers) w.close()
+    this.watchers = []
   }
 }
