@@ -127,4 +127,59 @@ VISION_BASE_URL=http://localhost:11434/v1
 COMPANION_ENABLED=1
 ```
 
+## 自定义工具（Tool 插件）
+
+你可以通过在 `tools/` 目录放置 JS/TS 文件来扩展 Agent 能力，无需修改 BFF 源码。插件启动时自动加载，文件保存后自动热重载。
+
+### 快速开始
+
+在项目根目录创建 `tools/weather.ts`：
+
+```ts
+import { defineTool } from '@agentkit/flutter-dev-bff/define'
+import { z } from 'zod'
+
+export default defineTool({
+  name: 'query_weather',
+  description: '查询指定城市的当前天气',
+  input: z.object({ city: z.string().describe('城市名，如「杭州」') }),
+  output: z.object({ temp: z.number(), condition: z.string() }).optional(),
+  execute: async ({ city }) => {
+    const apiKey = process.env.WEATHER_API_KEY
+    const res = await fetch(`https://api.weather.com/current?q=${encodeURIComponent(city)}&key=${apiKey}`)
+    if (!res.ok) throw new Error(`天气 API 返回 ${res.status}`)
+    return res.json()
+  },
+})
+```
+
+重启 BFF（或直接保存文件触发热重载），Agent 就能使用 `query_weather` 工具。
+
+### 插件目录
+
+- **项目级**：`<项目根>/tools/*.{js,ts,mjs,cjs}` —— 跟项目走，可提交 git 共享
+- **全局级**：`~/.agentkit/tools/*.{js,ts,mjs,cjs}` —— 你自己的工具，所有项目可用
+
+同名工具时优先级：项目级 > 全局级 > 内置。
+
+### 插件能力
+
+插件运行在 Node.js 环境，可以：
+- 用全局 `fetch` 调用任何 HTTP API
+- 用 `process.env` 读取密钥
+- 用 zod 声明 input/output schema
+- 返回任意 JSON 可序列化数据
+
+插件**不能**直接访问 adb、截图、CdpClient 等 BFF 内部服务——操作手机的工具都已内置。插件的定位是「给 Agent 装上业务能力」（查订单、调内部系统、控制 IoT 等）。
+
+### 输出校验
+
+`output` schema 可选。声明了就用 zod 校验返回值，不声明则透传。
+
+### 故障排查
+
+- 插件没加载：查看 BFF 启动日志，`[tool-loader]` 开头的 warn 会说明原因
+- 改了没生效：确认文件后缀是 `.js`/`.ts`/`.mjs`/`.cjs`（`.d.ts` 会被忽略）
+- 热重载不工作：某些编辑器的 atomic save 会触发 unlink+rename，可能漏事件，重启 BFF 即可
+
 Companion App 源码在 `companion-android/` 目录，需用 Android Studio 编译安装。
