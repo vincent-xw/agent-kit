@@ -68,6 +68,8 @@
   #skills-btn:hover { border-color: var(--accent); color: var(--accent); }
   #docs-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 16px; cursor: pointer; line-height: 1.2; }
   #docs-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #copy-context-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1.2; }
+  #copy-context-btn:hover { border-color: var(--accent2); color: var(--accent2); }
   #new-session-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 16px; cursor: pointer; line-height: 1.2; }
   #new-session-btn:hover { border-color: var(--accent2); color: var(--accent2); }
   #skills-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
@@ -132,6 +134,7 @@
   <span class="status" id="status">就绪</span>
   <button id="skills-btn" title="Skills">Skills</button>
   <button id="docs-btn" title="文档">📖</button>
+  <button id="copy-context-btn" title="复制上下文">📋</button>
   <button id="new-session-btn" title="新建会话">＋</button>
   <button id="settings-btn" title="设置">⚙</button>
 </header>
@@ -178,6 +181,57 @@ let running = false;
 // ── 文档按钮：新标签页打开 ──
 document.getElementById('docs-btn').addEventListener('click', () => {
   window.open('guide.html', '_blank', 'noopener');
+});
+
+// ── 一键复制上下文 ──
+document.getElementById('copy-context-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('copy-context-btn');
+  try {
+    // 从后端获取完整会话历史（含未在 DOM 中的上下文）
+    let serverHistory = '';
+    try {
+      const res = await fetch(`${BASE}/api/sessions/${sessionId}/messages`, {
+        headers: { 'Authorization': `Bearer ${TOKEN}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          serverHistory = '\n--- 服务端会话历史 ---\n' + data.messages.map(m => {
+            const role = m.role === 'user' ? '用户' : m.role === 'assistant' ? '助手' : m.role;
+            let content = '';
+            if (typeof m.content === 'string') content = m.content;
+            else if (Array.isArray(m.content)) content = m.content.map(c => c.text || c.type || '').join(' ');
+            return `【${role}】${content}`;
+          }).join('\n');
+        }
+      }
+    } catch {}
+
+    // 从 DOM 收集工具调用详情
+    const toolMsgs = [];
+    document.querySelectorAll('#messages .msg.tool').forEach((el) => {
+      const name = el.querySelector('.tool-name')?.textContent || 'tool';
+      const status = el.querySelector('.tool-status')?.textContent || '';
+      const output = el.querySelector('.tool-output')?.textContent || '';
+      toolMsgs.push(`【工具】${name} ${status}\n${output}`);
+    });
+
+    const context = [
+      `会话ID: ${sessionId}`,
+      `模式: ${promptEl.value}`,
+      `时间: ${new Date().toLocaleString()}`,
+      '',
+      toolMsgs.join('\n---\n'),
+      serverHistory,
+    ].filter(Boolean).join('\n');
+
+    await navigator.clipboard.writeText(context);
+    const old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  } catch (e) {
+    alert('复制失败: ' + e.message);
+  }
 });
 
 // ── 设置 ──

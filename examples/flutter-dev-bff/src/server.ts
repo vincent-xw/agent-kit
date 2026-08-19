@@ -263,7 +263,13 @@ export async function createFlutterDevBff(options: {
     }
     skillStore.save(slug, meta, body.prompt)
     // 把 skill 的 prompt 注册为可选用的系统提示词，运行时用 promptName=skill-<slug>
-    prompts.register({ name: `skill-${slug}`, version: meta.version, prompt: body.prompt })
+    // 同名同版本重复注册会抛 PROMPT_ALREADY_REGISTERED，这里容忍：
+    // skill 内容未变则无需重新注册；内容变了应该升版本号。
+    try {
+      prompts.register({ name: `skill-${slug}`, version: meta.version, prompt: body.prompt })
+    } catch (e) {
+      // 已注册过，忽略
+    }
     return c.json({ slug, meta })
   })
 
