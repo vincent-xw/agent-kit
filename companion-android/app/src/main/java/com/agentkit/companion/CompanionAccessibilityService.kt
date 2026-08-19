@@ -1,6 +1,10 @@
 package com.agentkit.companion
 
 import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.ServiceInfo
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -28,9 +32,31 @@ class CompanionAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // 启动前台通知，防止退到后台时被系统（尤其 MIUI）冻结并销毁 socket
+        startAsForeground()
         // 服务连接后立即启动 HTTP 服务器，不依赖 MainActivity 的 onResume。
         // onResume 可能在服务异步绑定前执行，导致 instance 仍为 null 而跳过启动。
         HttpServerHolder.start()
+    }
+
+    /** 前台通知，保持进程活跃不被冻结。 */
+    private fun startAsForeground() {
+        try {
+            val channelId = "companion_server"
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(
+                NotificationChannel(channelId, "Agent Kit Companion 服务", NotificationManager.IMPORTANCE_MIN),
+            )
+            val notification: Notification = Notification.Builder(this, channelId)
+                .setContentTitle("Agent Kit Companion")
+                .setContentText("无障碍服务运行中，等待 adb 连接")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .setOngoing(true)
+                .build()
+            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } catch (_: Exception) {
+            // 前台通知失败不阻塞服务器启动
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
