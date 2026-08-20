@@ -5,7 +5,8 @@
       "name": "flutter-dev-bff",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "flutter-dev-bff", "start"],
-      "port": 8788
+      "port": 8788,
+      "autoPort": true
     },
     {
       "name": "flutter-playground-web",
