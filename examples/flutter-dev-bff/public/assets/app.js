@@ -449,7 +449,7 @@ async function sendMessage(text) {
   try {
     const body = {
       input: text,
-      context: { timestamp: new Date().toISOString(), platform: 'android' },
+      context: { timestamp: new Date().toISOString(), platform: 'android', trustedHost: trustedHostEl.checked },
       stepMode: true,
       ...(promptEl.value !== 'free-form' ? { promptName: promptEl.value } : {}),
     }
@@ -468,7 +468,7 @@ async function sendMessage(text) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
         body: JSON.stringify({
-          context: { timestamp: new Date().toISOString(), platform: 'android' },
+          context: { timestamp: new Date().toISOString(), platform: 'android', trustedHost: trustedHostEl.checked },
           // 关键：continue 时必须带上 promptName，否则会回退到默认提示词
           ...(promptEl.value !== 'free-form' ? { promptName: promptEl.value } : {}),
         }),

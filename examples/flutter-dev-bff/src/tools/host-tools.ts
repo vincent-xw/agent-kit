@@ -5,8 +5,6 @@ import { readdir, readFile, writeFile, appendFile, stat, mkdir } from 'node:fs/p
 import { join, dirname } from 'node:path'
 import type { ToolDefinition } from '@agent-kit/core'
 import { assertInsideRoot } from './path-safety.js'
-import type { AskService } from '../services/ask-service.js'
-import type { HostPolicyService } from '../services/host-policy.js'
 
 const execAsync = promisify(exec)
 
@@ -15,13 +13,15 @@ export function msg(error: unknown): string {
 }
 
 export interface HostToolServices {
+  /** 运行时读取的当前工作区根目录（可在 UI 修改）。 */
   workspaceRoot: () => string
-  ask: AskService
-  policy: HostPolicyService
 }
 
 const TEXT_MAX = 200_000
 const EXEC_OUT_MAX = 64_000
+
+/** 强制子进程 UTF-8 本地化，避免剪贴板/命令输出被按本地默认编码解码成乱码。 */
+const UTF8_ENV = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }
 
 function isLocalHost(hostname: string): boolean {
   if (hostname === 'localhost' || hostname === '::1' || hostname === '0.0.0.0') return true
@@ -30,35 +30,11 @@ function isLocalHost(hostname: string): boolean {
   return /^10\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
 }
 
-/** 未受信任时走 user_confirm 审批；返回是否放行。callId 为工具自身调用。 */
-async function confirmIfNeeded(
-  svc: HostToolServices,
-  sessionId: string,
-  callId: string,
-  question: string,
-): Promise<boolean> {
-  if (svc.policy.isTrusted(sessionId)) return true
-  const answer = await svc.ask.awaitAnswer({
-    sessionId,
-    callId,
-    kind: 'approval',
-    question,
-    options: ['允许', '拒绝'],
-    select: 'single',
-  })
-  return answer === '允许'
-}
-
 async function statSafe(p: string) {
   try { return await stat(p) } catch { return undefined }
 }
 
 export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition[] {
-  const hostCtx = (c: unknown) => ({
-    sessionId: ((c ?? {}) as { sessionId?: string }).sessionId ?? '',
-    callId: ((c ?? {}) as { callId?: string }).callId ?? '',
-  })
-
   return [
     {
       name: 'host_file_list',
@@ -108,21 +84,17 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
     {
       name: 'host_file_write',
       execution: 'server',
-      description: '写入工作区根内文件（默认覆盖，可追加）。写入前通常需要用户审批。',
+      description: '写入工作区根内文件（默认覆盖，可追加）。写入工作区外的路径会被拒绝。是否执行需由你判断并先用 user_confirm 请求用户批准（除非受信任 host 模式已开启）。',
       input: z.object({ path: z.string(), content: z.string(), mode: z.enum(['overwrite', 'append', 'create']).optional() }),
-      output: z.object({ ok: z.boolean(), bytes: z.number().optional(), error: z.string().optional(), denied: z.boolean().optional() }),
+      output: z.object({ ok: z.boolean(), bytes: z.number().optional(), error: z.string().optional() }),
       timeoutMs: 30_000,
-      async execute(raw, context) {
+      async execute(raw) {
         const { path, content, mode = 'overwrite' } = raw as { path: string; content: string; mode?: string }
         let abs: string
         try {
           abs = assertInsideRoot(svc.workspaceRoot(), path)
         } catch (error) {
           return { ok: false, error: msg(error) }
-        }
-        const { sessionId, callId } = hostCtx(context)
-        if (!await confirmIfNeeded(svc, sessionId, callId, `允许写入文件 ${abs} 吗？`)) {
-          return { ok: false, denied: true }
         }
         try {
           if (mode === 'append') {
@@ -140,19 +112,15 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
     {
       name: 'host_exec',
       execution: 'server',
-      description: '在用户电脑上执行一条命令并截取输出。命令执行前通常需要审批。',
+      description: '在用户电脑上执行一条命令并截取输出。是否执行需由你判断并先用 user_confirm 请求用户批准（除非受信任 host 模式已开启）。',
       input: z.object({ command: z.string(), cwd: z.string().optional(), timeoutMs: z.number().int().min(1000).max(120_000).optional() }),
-      output: z.object({ ok: z.boolean(), stdout: z.string().optional(), stderr: z.string().optional(), exitCode: z.number().optional(), timedOut: z.boolean().optional(), error: z.string().optional(), denied: z.boolean().optional() }),
+      output: z.object({ ok: z.boolean(), stdout: z.string().optional(), stderr: z.string().optional(), exitCode: z.number().optional(), timedOut: z.boolean().optional(), error: z.string().optional() }),
       timeoutMs: 125_000,
-      async execute(raw, context) {
+      async execute(raw) {
         const { command, cwd, timeoutMs } = raw as { command: string; cwd?: string; timeoutMs?: number }
         let cwdAbs: string | undefined
         if (cwd) {
           try { cwdAbs = assertInsideRoot(svc.workspaceRoot(), cwd) } catch { return { ok: false, error: 'cwd outside workspace' } }
-        }
-        const { sessionId, callId } = hostCtx(context)
-        if (!await confirmIfNeeded(svc, sessionId, callId, `允许执行命令：${command.slice(0, 200)}？`)) {
-          return { ok: false, denied: true }
         }
         try {
           const out = await execAsync(command, {
@@ -160,6 +128,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
             timeout: timeoutMs ?? 60_000,
             maxBuffer: EXEC_OUT_MAX * 2,
             shell: '/bin/sh',
+            env: UTF8_ENV,
           })
           return { ok: true, stdout: String(out.stdout ?? '').slice(0, EXEC_OUT_MAX), stderr: String(out.stderr ?? '').slice(0, EXEC_OUT_MAX), exitCode: 0 }
         } catch (error) {
@@ -225,26 +194,35 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
     {
       name: 'host_clipboard',
       execution: 'server',
-      description: '读写用户电脑剪贴板。read 直接读；write 需审批。',
+      description: '读写用户电脑剪贴板。读写是否执行都需你判断并先用 user_confirm 请求用户批准（除非受信任 host 模式已开启）。',
       input: z.object({ action: z.enum(['read', 'write']), text: z.string().optional() }),
-      output: z.object({ ok: z.boolean(), text: z.string().optional(), error: z.string().optional(), denied: z.boolean().optional() }),
+      output: z.object({ ok: z.boolean(), text: z.string().optional(), error: z.string().optional() }),
       timeoutMs: 10_000,
-      async execute(raw, context) {
+      async execute(raw) {
         const { action, text } = raw as { action: 'read' | 'write'; text?: string }
         const copyCmd = process.platform === 'darwin' ? 'pbcopy' : 'xclip -selection clipboard'
         const pasteCmd = process.platform === 'darwin' ? 'pbpaste' : 'xclip -selection clipboard -o'
         if (action === 'read') {
           try {
-            const { stdout } = await execAsync(pasteCmd, { shell: '/bin/sh', maxBuffer: 1024 * 1024 })
-            return { ok: true, text: String(stdout ?? '').slice(0, TEXT_MAX) }
+            const { stdout } = await execAsync(pasteCmd, { shell: '/bin/sh', encoding: 'buffer', maxBuffer: 1024 * 1024, env: UTF8_ENV })
+            const buf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? '')
+            // 剪贴板可能是 UTF-8，也可能是 GBK/GB18030；UTF-8 解码出现替换符时回退到 GB18030。
+            const utf8 = buf.toString('utf8')
+            const text = utf8.includes('�') ? new TextDecoder('gb18030').decode(buf) : utf8
+            return { ok: true, text: text.slice(0, TEXT_MAX) }
           } catch {
             return { ok: false, error: `${process.platform === 'darwin' ? 'pbpaste' : 'xclip'} 不可用` }
           }
         }
-        const { sessionId, callId } = hostCtx(context)
-        if (!await confirmIfNeeded(svc, sessionId, callId, '允许写入剪贴板吗？')) return { ok: false, denied: true }
         try {
-          await execAsync(`printf %s ${JSON.stringify(text ?? '')} | ${copyCmd}`, { shell: '/bin/sh' })
+          await execAsync(`printf %s ${JSON.stringify(text ?? '')} | ${copyCmd}`, { shell: '/bin/sh', env: UTF8_ENV })
+          // 读回校验，确保真的写入（某些沙箱/无 GUI 会话里 pbcopy 会静默失败）
+          const { stdout } = await execAsync(pasteCmd, { shell: '/bin/sh', encoding: 'buffer', maxBuffer: 1024 * 1024, env: UTF8_ENV })
+          const buf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? '')
+          const utf8 = buf.toString('utf8')
+          const got = (utf8.includes('') ? new TextDecoder('gb18030').decode(buf) : utf8).trim()
+          const want = (text ?? '').trim()
+          if (got !== want) return { ok: false, error: '写入后校验不一致——剪贴板未真正更新（可能是沙箱/无 GUI 会话限制）' }
           return { ok: true }
         } catch (error) {
           return { ok: false, error: msg(error) }

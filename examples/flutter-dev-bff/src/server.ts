@@ -140,7 +140,7 @@ export async function createFlutterDevBff(options: {
     fallback: existsSync(options.flutterProjectPath) ? options.flutterProjectPath : process.cwd(),
   })
   const userToolDefs = createUserInteractionToolDefinitions({ ask: askService })
-  const hostToolDefs = createHostToolDefinitions({ workspaceRoot: () => workspaceStore.get(), ask: askService, policy: hostPolicy })
+  const hostToolDefs = createHostToolDefinitions({ workspaceRoot: () => workspaceStore.get() })
 
   // 插件工具与内置工具合并，同名以插件为准（Map 去重）
   let finalTools = new Map([...toolDefinitions, ...userToolDefs, ...hostToolDefs, ...pluginTools].map((t) => [t.name, t]))
