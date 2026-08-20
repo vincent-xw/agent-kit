@@ -101,3 +101,30 @@ describe('SQLite SecretProvider', () => {
   })
 
 })
+
+describe('SQLite runtime 流式 delta 标注', () => {
+  it('delta 携带 sessionId 且每次补全 turnId 不同', async () => {
+    const database = new DatabaseSync(':memory:')
+    const deltas: Array<{ content?: string; sessionId?: string; turnId?: string }> = []
+    const runtime = createSqliteAgentRuntime({
+      database,
+      masterKey: validMasterKey,
+      maxSteps: 3,
+      llmDelta: (delta) => deltas.push(delta),
+    })
+    await runtime.secrets.put({ apiKey: 'sk-test', baseUrl: 'https://llm.example.test/v1', model: 'test-model' })
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: `回复${call}` } }] }) }
+    }))
+    await runtime.harness.run({ sessionId: 's-delta', input: '一', context: {} })
+    await runtime.harness.run({ sessionId: 's-delta', input: '二', context: {} })
+    expect(deltas).toHaveLength(2)
+    expect(deltas[0]).toMatchObject({ content: '回复1', sessionId: 's-delta' })
+    expect(deltas[1]).toMatchObject({ content: '回复2', sessionId: 's-delta' })
+    expect(deltas[0]!.turnId).toBeTruthy()
+    expect(deltas[0]!.turnId).not.toBe(deltas[1]!.turnId)
+    database.close()
+  })
+})

@@ -136,10 +136,14 @@ export function createSqliteAgentRuntime(options: {
     llm: {
       complete: async (request) => {
         const secret = await secrets.get()
+        // turnId 在每次补全开头生成：同一次补全的 delta 分轮渲染依据，跨次必然不同。
+        const turnId = `turn-${Math.random().toString(36).slice(2, 10)}`
         return createLlmClient({
           ...secret,
           ...(options.llmTrace ? { trace: options.llmTrace } : {}),
-          ...(options.llmDelta ? { onDelta: options.llmDelta } : {}),
+          ...(options.llmDelta
+            ? { onDelta: (delta) => options.llmDelta?.({ ...delta, sessionId: request.sessionId, turnId }) }
+            : {}),
           ...(options.llmMaxRetries !== undefined ? { maxRetries: options.llmMaxRetries } : {}),
         }).complete(request)
       },
