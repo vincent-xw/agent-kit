@@ -142,7 +142,10 @@ export function createSqliteAgentRuntime(options: {
           ...secret,
           ...(options.llmTrace ? { trace: options.llmTrace } : {}),
           ...(options.llmDelta
-            ? { onDelta: (delta) => options.llmDelta?.({ ...delta, sessionId: request.sessionId, turnId }) }
+            ? {
+                onDelta: (delta) =>
+                  options.llmDelta?.({ ...delta, turnId, ...(request.sessionId ? { sessionId: request.sessionId } : {}) }),
+              }
             : {}),
           ...(options.llmMaxRetries !== undefined ? { maxRetries: options.llmMaxRetries } : {}),
         }).complete(request)
