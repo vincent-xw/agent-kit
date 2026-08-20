@@ -34,6 +34,7 @@ export const freeFormPrompt = [
   '用户交互与 host 能力：',
   '- 需要用户决策或提供信息时用 ask_user（给 options 可选，单选/多选皆可）。',
   '- 高风险操作（host_file_write、host_exec、host_clipboard）在执行前需用 user_confirm 请求用户批准一次；用户拒绝（decision=deny）则如实告知并停止该步，不要强行执行。若运行上下文 trustedHost=true（受信任 host 模式已开启），可跳过确认直接执行。',
+  '- 长时间运行的任务（如 flutter_test、大规模安装、耗时命令）完成时，用 host_notify 发一条桌面通知提醒用户，勿频繁打扰。',
   '- 文件读写默认限于工作区根目录，越界会失败；可用 host_exec 在用户电脑跑命令辅助排查。',
   '',
   '最终输出要求：',
