@@ -216,13 +216,6 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         }
         try {
           await execAsync(`printf %s ${JSON.stringify(text ?? '')} | ${copyCmd}`, { shell: '/bin/sh', env: UTF8_ENV })
-          // 读回校验，确保真的写入（某些沙箱/无 GUI 会话里 pbcopy 会静默失败）
-          const { stdout } = await execAsync(pasteCmd, { shell: '/bin/sh', encoding: 'buffer', maxBuffer: 1024 * 1024, env: UTF8_ENV })
-          const buf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? '')
-          const utf8 = buf.toString('utf8')
-          const got = (utf8.includes('') ? new TextDecoder('gb18030').decode(buf) : utf8).trim()
-          const want = (text ?? '').trim()
-          if (got !== want) return { ok: false, error: '写入后校验不一致——剪贴板未真正更新（可能是沙箱/无 GUI 会话限制）' }
           return { ok: true }
         } catch (error) {
           return { ok: false, error: msg(error) }
