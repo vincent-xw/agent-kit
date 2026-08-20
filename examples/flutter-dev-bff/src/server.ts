@@ -30,7 +30,7 @@ import {
   createLlmVerboseLogger,
   createPromptRegistry,
 } from '@agent-kit/core'
-import type { AuditLogger, LlmClient, LlmSecret, LlmTraceEvent } from '@agent-kit/core'
+import type { AuditLogger, LlmClient, LlmSecret, LlmTraceEvent, SessionMessage } from '@agent-kit/core'
 
 import { createFlutterToolDefinitions } from './flutter-tools.js'
 import { debuggingPrompt, freeFormPrompt, testingPrompt } from './prompts.js'
@@ -52,6 +52,7 @@ import { SkillStore } from './services/skill-store.js'
 import { generateSkill, optimizeSkill } from './services/skill-generator.js'
 import type { FlutterEvent } from './services/event-bus.js'
 import { instrumentTools, llmTraceToBus } from './tool-events.js'
+import { renderSessionMarkdown } from './session-export.js'
 
 export async function createFlutterDevBff(options: {
   masterKey: string
@@ -279,6 +280,21 @@ export async function createFlutterDevBff(options: {
       .get(scopedId) as { messages?: string } | undefined
     if (!row?.messages) return c.json({ messages: [] })
     return c.json({ messages: JSON.parse(row.messages) })
+  })
+
+  // 一键复制上下文：服务端生成完整 Markdown 转录，与前端显示开关无关
+  app.get('/api/sessions/:sessionId/export', (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const rawLimit = c.req.query('toolOutputLimit')
+    const toolOutputLimit = rawLimit === undefined ? 20000 : Math.max(0, Number(rawLimit) || 0)
+    const id = c.req.param('sessionId')
+    const scopedId = `flutter-dev:${id}`
+    const row = database.prepare('SELECT messages FROM agent_sessions WHERE session_id = ?').get(scopedId) as { messages?: string } | undefined
+    const messages: SessionMessage[] = row?.messages ? JSON.parse(row.messages) : []
+    const meta = database.prepare('SELECT title FROM webui_sessions WHERE session_id = ?').get(id) as { title?: string } | undefined
+    c.header('content-type', 'text/markdown; charset=utf-8')
+    return c.body(renderSessionMarkdown(meta?.title ?? id, messages, toolOutputLimit))
   })
 
   // ── Skills ──────────────────────────────────────────────

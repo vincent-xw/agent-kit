@@ -169,4 +169,34 @@ describe('WebUI 会话管理', () => {
     expect(res.status).toBe(404)
     database.close()
   })
+
+  it('export 端点返回 Markdown 转录', async () => {
+    const { app, database } = await bff()
+    await app.request('/api/sessions', { method: 'POST', headers: auth, body: JSON.stringify({ id: 'exp-1', title: '导出测试' }) })
+    const history = [
+      { role: 'user', content: '启动' },
+      { role: 'assistant', content: '好的', toolCalls: [{ callId: 'c1', toolName: 'flutter_run', input: { mode: 'run' } }] },
+      { role: 'tool', content: { ok: true }, callId: 'c1', toolName: 'flutter_run' },
+      { role: 'assistant', content: '完成' },
+    ]
+    database.prepare('INSERT INTO agent_sessions (session_id, messages, updated_at) VALUES (?, ?, ?)')
+      .run('flutter-dev:exp-1', JSON.stringify(history), new Date().toISOString())
+
+    const res = await app.request('/api/sessions/exp-1/export', { headers: auth })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    const md = await res.text()
+    expect(md).toContain('# 会话: 导出测试')
+    expect(md).toContain('## 工具调用: flutter_run')
+    expect(md).toContain('"ok": true')
+
+    // 截断档位：toolOutputLimit=5 时长输出被截断
+    database.prepare("UPDATE agent_sessions SET messages = ? WHERE session_id = 'flutter-dev:exp-1'").run(JSON.stringify([
+      { role: 'assistant', content: null, toolCalls: [{ callId: 'c2', toolName: 't', input: {} }] },
+      { role: 'tool', content: { data: 'x'.repeat(2000) }, callId: 'c2', toolName: 't' },
+    ]))
+    const truncated = await (await app.request('/api/sessions/exp-1/export?toolOutputLimit=5', { headers: auth })).text()
+    expect(truncated).toContain('已截断，共 ')
+    database.close()
+  })
 })
