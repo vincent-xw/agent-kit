@@ -1,14 +1,5 @@
-/* Flutter Dev BFF 文档主题 —— 与主 UI 风格统一 */
+/* Flutter Dev BFF 文档主题 —— 颜色变量移至 /assets/theme.css（亮暗两套） */
 :root {
-  --doc-bg: #0f1525;
-  --doc-surface: #16213e;
-  --doc-surface2: #1a2744;
-  --doc-text: #e0e6f0;
-  --doc-text2: #8a94a8;
-  --doc-accent: #4fc3f7;
-  --doc-accent2: #66bb6a;
-  --doc-border: #2a3a5a;
-  --doc-code-bg: #0a0f1c;
   --doc-radius: 10px;
 }
 
