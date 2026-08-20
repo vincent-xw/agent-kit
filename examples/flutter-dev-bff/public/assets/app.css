@@ -144,3 +144,15 @@ header .status.connected { color: var(--accent2); }
 .run-item .run-status.completed { color: var(--accent2); }
 .run-item .run-status.failed { color: var(--error); }
 .run-item .run-time { color: var(--text2); font-size: 11px; }
+
+/* 问答 / 审批卡片 */
+.ask-card { align-self: flex-start; max-width: 90%; background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.ask-card.answered { border-color: var(--border); opacity: 0.9; }
+.ask-title { font-size: 13px; font-weight: 600; }
+.ask-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-options.single .ask-opt { padding: 6px 12px; border: 1px solid var(--border); background: var(--tool-bg); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 12px; }
+.ask-options.single .ask-opt:hover { border-color: var(--accent); }
+.ask-options.multi .ask-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; }
+.ask-input-row { display: flex; }
+.ask-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px; }
+.ask-submit { align-self: flex-end; padding: 8px 16px; background: var(--accent); color: var(--bg); border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; }

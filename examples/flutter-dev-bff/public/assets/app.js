@@ -264,9 +264,12 @@ async function restoreHistory(sessionId, view) {
         }
         if (Array.isArray(m.toolCalls)) {
           for (const call of m.toolCalls) {
+            if (call.toolName === 'ask_user' || call.toolName === 'user_confirm') continue
             appendToolCard(view, call.callId, call.toolName, call.input, outputs.get(call.callId), '历史')
           }
         }
+      } else if (m.role === 'tool' && (m.toolName === 'ask_user' || m.toolName === 'user_confirm')) {
+        view.el.appendChild(renderAckedCard(m))
       }
     }
     scrollBottom()
@@ -339,12 +342,93 @@ function connectEvents() {
     })
   })
 
+  es.addEventListener('ask_user', (e) => {
+    const data = JSON.parse(e.data)
+    routeEvent(data, Number(e.lastEventId), (view) => {
+      renderAskCard(view, data)
+    })
+  })
+
   es.onerror = () => {
     statusEl.textContent = running ? '思考中…（事件流重连中）' : '事件流重连中…'
   }
   es.onopen = () => {
     if (!running) statusEl.textContent = '就绪'
   }
+}
+
+// ── 问答 / 审批卡片（ask_user 事件）──
+function renderAskCard(view, data) {
+  const card = document.createElement('div')
+  card.className = 'msg ask-card'
+  const isApproval = data.kind === 'approval'
+  const options = Array.isArray(data.options) ? data.options : []
+  let optsHtml = ''
+  if (data.select === 'single') {
+    optsHtml = `<div class="ask-options single">${options.map((o) => `<button class="ask-opt" data-val="${escapeHtml(o)}">${escapeHtml(o)}</button>`).join('')}</div>`
+  } else {
+    optsHtml = `<div class="ask-options multi">${options.map((o) => `<label class="ask-chip"><input type="checkbox" value="${escapeHtml(o)}">${escapeHtml(o)}</label>`).join('')}</div>`
+  }
+  card.innerHTML = `
+    <div class="ask-title">${isApproval ? '⚠️ 操作审批' : '❓ 需要你回答'}：${escapeHtml(data.question)}</div>
+    ${optsHtml}
+    <div class="ask-input-row"><input class="ask-input" type="text" placeholder="…或输入其他答案"></div>
+    <button class="ask-submit">提交</button>`
+  card._data = data
+  view.el.appendChild(card)
+  scrollBottom()
+  // 单选：点选项立即提交
+  card.querySelectorAll('.ask-opt').forEach((btn) => btn.addEventListener('click', () => {
+    submitAnswer(view, card, btn.dataset.val)
+  }))
+  const submit = card.querySelector('.ask-submit')
+  const input = card.querySelector('.ask-input')
+  submit.addEventListener('click', () => {
+    if (data.select === 'multiple') {
+      const checked = Array.from(card.querySelectorAll('.ask-chip input:checked')).map((i) => i.value)
+      const extra = input.value.trim()
+      submitAnswer(view, card, extra ? [...checked, extra] : checked)
+    } else {
+      submitAnswer(view, card, input.value.trim() || (card.querySelector('.ask-opt.selected')?.dataset.val ?? ''))
+    }
+  })
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit.click() })
+}
+
+function submitAnswer(view, card, answer) {
+  const data = card._data
+  card.querySelectorAll('button, input').forEach((el) => { el.disabled = true })
+  fetch(`/api/sessions/${encodeURIComponent(normalizeSessionId(data.sessionId))}/asks/${encodeURIComponent(data.callId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ answer }),
+  })
+    .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`) })
+    .then(() => {
+      card.classList.add('answered')
+      const disp = Array.isArray(answer) ? answer.join(', ') : String(answer ?? '')
+      card.querySelector('.ask-input-row')?.remove()
+      card.querySelector('.ask-options')?.remove()
+      card.querySelector('.ask-submit')?.remove()
+      card.querySelector('.ask-title').textContent = `✅ 已${data.kind === 'approval' ? '审' : '答'}：${disp}`
+    })
+    .catch((err) => { alert('提交失败: ' + err.message) })
+}
+
+/** 历史还原：把 ask_user/user_confirm 的 tool 消息渲染成已答/已审摘要。 */
+function renderAckedCard(m) {
+  const div = document.createElement('div')
+  div.className = 'msg ask-card answered'
+  const content = m.content
+  let summary = ''
+  if (content && typeof content === 'object') {
+    if (Array.isArray(content.answer)) summary = content.answer.join(', ')
+    else if ('answer' in content) summary = String(content.answer)
+    else if ('decision' in content) summary = String(content.decision)
+    else if ('error' in content) summary = `(${String(content.error)})`
+  }
+  div.textContent = `📌 ${m.toolName === 'user_confirm' ? '已审' : '已答'}：${summary || '（无记录）'}`
+  return div
 }
 
 // ── 发送与 run/continue 循环 ──
@@ -482,10 +566,25 @@ const settingsOverlay = $('settings-overlay')
 const showToolDetailsEl = $('setting-show-tool-details')
 const themeEl = $('setting-theme')
 const copyLimitEl = $('setting-copy-limit')
+const trustedHostEl = $('setting-trusted-host')
 
 showToolDetailsEl.checked = showToolDetails
 themeEl.value = localStorage.getItem('theme') || 'dark'
 copyLimitEl.value = localStorage.getItem('copy_tool_output_limit') ?? '20000'
+
+async function loadTrustedHost() {
+  if (!currentSessionId) return
+  try {
+    const data = await api(`/api/sessions/${encodeURIComponent(currentSessionId)}/settings`)
+    trustedHostEl.checked = !!data.trustedHost
+  } catch { /* 默认关 */ }
+}
+trustedHostEl.addEventListener('change', async () => {
+  if (!currentSessionId) return
+  await api(`/api/sessions/${encodeURIComponent(currentSessionId)}/settings`, {
+    method: 'POST', body: JSON.stringify({ trustedHost: trustedHostEl.checked }),
+  }).catch(() => {})
+})
 
 function applyToolDetailSetting() {
   for (const view of views.values()) {
@@ -817,6 +916,7 @@ async function init() {
   }
   if (!target) target = sessions[0]?.id ?? (await createSession())
   await switchSession(target)
+  loadTrustedHost()
   connectEvents()
 }
 
