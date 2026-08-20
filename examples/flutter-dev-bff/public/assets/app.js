@@ -588,16 +588,27 @@ trustedHostEl.addEventListener('change', async () => {
 
 // 全局当前工作区：载入回显，保存 PATCH 到服务端
 const workspaceInputEl = $('setting-workspace')
+const workspaceSaveBtn = $('setting-workspace-save')
 async function loadWorkspace() {
   try {
     const data = await api('/api/workspace')
     workspaceInputEl.value = data.workspace || ''
   } catch { /* 忽略 */ }
 }
-$('setting-workspace-save').addEventListener('click', async () => {
+workspaceSaveBtn.addEventListener('click', async () => {
   const ws = workspaceInputEl.value.trim()
   if (!ws) return
-  await api('/api/workspace', { method: 'POST', body: JSON.stringify({ workspace: ws }) }).catch(() => {})
+  const old = workspaceSaveBtn.textContent
+  workspaceSaveBtn.disabled = true
+  try {
+    await api('/api/workspace', { method: 'POST', body: JSON.stringify({ workspace: ws }) })
+    workspaceSaveBtn.textContent = '✓ 已保存'
+    setTimeout(() => { workspaceSaveBtn.textContent = old; workspaceSaveBtn.disabled = false }, 1500)
+  } catch (e) {
+    workspaceSaveBtn.textContent = '保存失败'
+    setTimeout(() => { workspaceSaveBtn.textContent = old; workspaceSaveBtn.disabled = false }, 1500)
+    alert('保存工作区失败: ' + e.message)
+  }
 })
 
 function applyToolDetailSetting() {
