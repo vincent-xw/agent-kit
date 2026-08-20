@@ -14,7 +14,7 @@ flutter-dev-bff 现有工具集中在三块：设备/UI（`mobile_*`）、WebVie
 
 ## 目标
 
-- 7 个新增内置工具：`host_file_list`、`host_file_read`、`host_file_write`、`host_exec`、`host_notify`、`web_fetch`、`host_clipboard`，加 1 个 `ask_user` 问询工具（共 8 个）
+- 7 个新增内置工具：`host_file_list`、`host_file_read`、`host_file_write`、`host_exec`、`host_notify`、`web_fetch`、`host_clipboard`，加 2 个交互工具 `ask_user`（问询）与 `user_confirm`（操作审批），共 9 个
 - `ask_user` 同时支持单选与多选，前端选项按钮 + 输入框「其他」
 - 阻塞式问询：agent 询问时暂停 LLM 循环，用户作答后带着答案继续（方案 A）
 - 分级权限：默认读放行、写/执行先确认；设置面板「受信任 host 模式」开关放开确认
@@ -36,7 +36,8 @@ flutter-dev-bff 现有工具集中在三块：设备/UI（`mobile_*`）、WebVie
 | 设备端文件能力 | **整轮不做**（任意 APP 目录写入不可靠，留待有真实需求再议） |
 | 问询形态 | **选项 + 输入框带「其他」**；同时支持单选与多选 |
 | 附加工具 | 全选：`host_exec`、`host_notify`、`web_fetch`、`host_clipboard` |
-| 权限模型 | **分级开关**：默认读放行、写/执行先走 `ask_user` 确认；「受信任 host 模式」开关放开 |
+| 权限模型 | **分级开关**：默认读放行、写/执行先走 `user_confirm` 审批；「受信任 host 模式」开关放开 |
+| 审批工具 | **加独立 `user_confirm`**：与 ask_user 语义分开，高危工具内部审批复用它 |
 | ask 机制 | **方案 A：阻塞式工具 + 进程内待答存储** |
 
 ## 架构方案（已选：方案 A）
@@ -54,28 +55,30 @@ flutter-dev-bff 现有工具集中在三块：设备/UI（`mobile_*`）、WebVie
 | `host_file_list` | 列工作区根内目录 | host | 放行 |
 | `host_file_read` | 读根内文本文件（截断） | host | 放行 |
 | `host_file_write` | 写根内文件（覆盖/追加/新建） | host | 确认 |
-| `ask_user` | 阻塞问询，单选/多选 + 其他 | 交互 | —— |
+| `ask_user` | 问询：单选/多选 + 其他 | 交互 | —— |
+| `user_confirm` | 操作审批：允许/拒绝 + 可选一次性放行 | 交互 | 审批 |
 | `host_exec` | 受控执行 host 命令截输出 | host | 确认 |
 | `host_notify` | 桌面通知 | host | 放行 |
 | `web_fetch` | 抓 URL 文本 | 出网 | 受限放行 |
 | `host_clipboard` | 读写剪贴板 | host | 读放行/写确认 |
 
-### 共享基础设施：`askAndWait()`
+### 共享基础设施：阻塞式交互底座
 
-`ask_user` 工具与高危工具的权限确认都复用同一个 `askAndWait()`：
+`ask_user`（问询）、`user_confirm`（审批）与高危工具内部的强制审批，都复用同一个「阻塞式交互底座」：
 
 ```
-askAndWait(services, { sessionId, callId, question, options, select })
-  -> bus.emit({ type: 'ask_user', sessionId, callId, question, options, select })
+interactive(services, { sessionId, callId, kind, question, options, select })
+  -> bus.emit({ type: 'ask_user', sessionId, callId, kind, question, options, select })
        + pendingAsks.set(callId, { resolve, abort })
   -> await promise
   -> POST /api/asks/:callId { answer }   // 用户作答
   -> resolve({ answer })
 ```
 
-- 挂载在注入到工具的服务集合（`FlutterToolServices`）里的 `askService`，暴露 `awaitAnswer(sessionId, callId, question, options, select): Promise<string | string[]>` 与 `cancel(callId)`
-- 进程内 `pendingAsks` `Map<callId, { resolve, controller }>`，重启即丢（由工具 run 超时自愈）
-- 高危工具确认是 `askAndWait` 的用法之一：问题携带待执行命令/路径，选项 `['允许', '拒绝']`
+- 挂载在注入到工具的服务集合（`FlutterToolServices`）里的 `askService`，暴露 `awaitAnswer(sessionId, callId, kind, question, options, select): Promise<string | string[]>` 与 `cancel(callId)`
+- `kind` 标记请求类型：`'question'`（ask_user）/ `'approval'`（user_confirm / 高危工具强制审批），供前端渲染不同卡片、供历史还原区分「问询」与「审批」
+- 事件统一发 `ask_user` 名字、带 `kind` 字段区分；进程内 `pendingAsks` `Map<callId, { resolve, controller }>`，重启即丢（由工具 run 超时自愈）
+- **权限把关是用法之一**：高危工具确认与 `user_confirm` 走同一底座，只是 `kind='approval'`、选项固定 `['允许', '拒绝']`
 
 ### `ask_user` 工具
 
@@ -84,13 +87,26 @@ askAndWait(services, { sessionId, callId, question, options, select })
   - `select='single'` 时 `options` 可空（纯输入）
 - **执行流程**
   1. 校验 schema（非法选项/空问题 → `{ ok:false, error }` 而非抛异常，让 LLM 自愈）
-  2. `bus.emit({ type:'ask_user', sessionId, callId, question, options, select })`
+  2. `bus.emit({ type:'ask_user', kind:'question', sessionId, callId, question, options, select })`
   3. `await askService.awaitAnswer(...)`
   4. 作答到达 → 输出 `{ answer: string | string[] }` 返回 LLM
 - **输出写入历史**：答案作为 tool 消息入 `agent_sessions`，与其它工具一致
 - **超时**：工具 `timeoutMs` 取较高值（如 300s）；超时返回 `{ timeout: true }` 让 LLM 知晓「用户未及时回复」
 - **取消**：复用 `context.signal`——agent 侧取消 run 会中止 ask，`pendingAsks` 清掉对应条目
 - **并发**：一次 run 内 LLM 单轮串行，至多一个未决 ask；跨会话独立
+
+### `user_confirm` 工具（操作审批）
+
+- **输入 schema**：`{ action: string, message?: string, purpose?: string, target?: string }`
+  - `action`：被审操作的简述（如「写文件 /path」「执行命令 git push」）
+  - `message`：给用户的展示文案；`purpose`：LLM 自述审批理由；`target`：操作对象（路径/命令/URL）
+- **语义**：与 ask_user（开放选项/多选/输入）**分开**——只做二进制审批
+- **执行流程**
+  1. 经底座 `kind='approval'` 发 `ask_user` 事件，选项固定 `['允许', '拒绝']`，另可附加「本次运行内放行同类」的临时 grant 选项
+  2. 答案 `'allow'` / `'deny'`（或带 `grant`）落回
+  3. 输出 `{ decision: 'allow'|'deny', grant?: 'run'|'session'|'once', reason?: string }` 返回 LLM
+- **临时 grant**：`decision:'allow'` 时可选 `grant`，在 `HostPolicy` 记一笔「本次运行内同类放行」，减少确认次数；受信任开关是更持久的 `session` 级放行
+- **高危工具内部审批复用它**：`host_file_write`、`host_exec`、`host_clipboard`(write) 在被调用时经 `user_confirm` 把关（受信任开则直通）
 
 ### 回填端点 `POST /api/asks/:callId`
 
@@ -105,8 +121,8 @@ askAndWait(services, { sessionId, callId, question, options, select })
 - WebUI 设置面板加「受信任 host 模式」开关（默认关），`GET/POST /api/settings` 读写
 - **关（默认）**：
   - 放行：`host_file_list`、`host_file_read`、`host_clipboard`(read)、`web_fetch`(只读)、`host_notify`
-  - 确认：`host_file_write`、`host_exec`、`host_clipboard`(write)——先走 `ask_user` 弹「允许在 host 执行/写入 <X>？」选项 `[允许, 拒绝]`；拒绝返回 `{ ok:false, denied:true }`
-- **开**：高危工具全部直接执行，不再弹确认
+  - 审批：`host_file_write`、`host_exec`、`host_clipboard`(write)——先经 `user_confirm` 弹「允许在 host 执行/写入 <X>？」选项 `[允许, 拒绝]`；拒绝返回 `{ ok:false, denied:true }` / 审批返回 `denied`
+- **开**：高危工具全部直接执行，不再弹审批（等价于会话级 grant）
 - **根约束不因开关放宽**；`web_fetch` 白名单不因开关放宽
 
 ### host 工具细部
@@ -114,21 +130,23 @@ askAndWait(services, { sessionId, callId, question, options, select })
 - 路径解析统一：相对路径以工作区根为基准；绝对路径必须解析进根内（`path.resolve` + 前缀比对，拒绝 `..` 逃逸），否则 `{ ok:false, error: 'path outside workspace' }`
 - **`host_file_list`**：`{ path }` → `{ entries: [{ name, type:'file'|'dir', size?, modifiedAt }] }`；目录不存在 → `{ ok:false, error }`
 - **`host_file_read`**：`{ path }` → `{ ok, content, truncated }`；文本读，截断到上限（默认 200KB）；二进制读前检测，返回可读提示
-- **`host_file_write`**：`{ path, content, mode?: 'overwrite'|'append'|'create' }` → `{ ok, bytes, path }`；写入前走确认
-- **`host_exec`**：`{ command, cwd?, timeoutMs? }` → `{ ok, stdout, stderr, exitCode, timedOut }`；`sh -c` 执行，输出截断（默认 64KB），越权/超时失败；确认文案含 command
+- **`host_file_write`**：`{ path, content, mode?: 'overwrite'|'append'|'create' }` → `{ ok, bytes, path }`；写入前经 `user_confirm` 审批
+- **`host_exec`**：`{ command, cwd?, timeoutMs? }` → `{ ok, stdout, stderr, exitCode, timedOut }`；`sh -c` 执行，输出截断（默认 64KB），越权/超时失败；审批文案含 command
 - **`web_fetch`**：`{ url }` → `{ ok, status, text, blocked? }`；仅 http(s)，域名不得为本地回环/保留段；可选白名单 `HOST_FETCH_ALLOWED_HOSTS`（准用主体，未设则按回环+保留段禁止）；文本截断 200KB；不满足 → `{ ok:false, blocked:true }`
-- **`host_clipboard`**：`{ action:'read'|'write', text? }` → `{ ok, text? }`；`pbcopy/pbpaste`（macOS）/ `xclip`（Linux），缺失返回错误；写需确认
+- **`host_clipboard`**：`{ action:'read'|'write', text? }` → `{ ok, text? }`；`pbcopy/pbpaste`（macOS）/ `xclip`（Linux），缺失返回错误；写需审批
 - **`host_notify`**：`{ title, message? }` → `{ ok }`；`osascript`（macOS）/ `notify-send`（Linux），失败静默降级
 - 输出一律截断，历史里留摘要不留全文（延续既有 truncate 约定）
 
 ## WebUI 呈现
 
-### 问答卡片（`ask_user` 事件）
+### 问答卡片（`ask_user` 事件，含审批）
 
 - `app.js` 新增 `ask_user` 事件监听：按 sessionId 路由（复用 `routeEvent`），当前会话 `#messages` 内渲染卡片；非当前会话收到点亮活动圆点
-- 卡片结构：问题标题 → 选项区 → 输入框 → 提交
-  - 单选：选项按钮，点即选中并立即提交；输入框可填「其他」
-  - 多选：可勾选 chips + 输入框补充，点提交汇总 POST
+- 卡片按 `kind` 分两态渲染：
+  - `kind='question'`（ask_user）：选项按钮 + 输入框「其他」
+    - 单选：选项按钮，点即选中并立即提交；输入框可填其他
+    - 多选：可勾选 chips + 输入框补充，点提交汇总 POST
+  - `kind='approval'`（user_confirm / 高危工具审批）：问题 + `[允许, 拒绝]` 两个按钮，可含可选的「本次运行内放行同类」勾选
 - 交互期间输入栏/发送禁用（复用全局 `running`——阻塞式 run 下 `running` 已为 true）
 - 历史还原：`restoreHistory` 遇到 ask 的 tool 消息渲染「已答：<答案>」折叠摘要，不可再编辑
 
@@ -145,7 +163,8 @@ askAndWait(services, { sessionId, callId, question, options, select })
 ## 测试
 
 - `ask-user.test.ts`：单选/多选回填、重复作答被拒、超时、`context.signal` 中止、callId 越权拒绝、schema 非法
-- `host-tools.test.ts`：路径越权（`..`、绝对路径落根外）全拒；写文件确认与受信任模式绕过；读截断；exec 超时/输出截断；web_fetch 白名单拒绝
+- `user-confirm.test.ts`：允许/拒绝回填、`denied` 传递、临时 grant（本次运行内同类放行）、受信任开关直通、审批超时
+- `host-tools.test.ts`：路径越权（`..`、绝对路径落根外）全拒；写文件审批与受信任模式绕过；读截断；exec 超时/输出截断；web_fetch 白名单拒绝
 - `HostPolicy` 单测：按会话隔离、默认关、开关读写
 - 前端无测试基建，靠手动浏览器验证（问答卡片、单选/多选、受信任开关）
 - 全部为加性改动，不回归既有 113 项测试；`@agent-kit/core` 不改契约，仅 BFF 层新增
