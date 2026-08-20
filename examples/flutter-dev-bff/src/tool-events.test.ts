@@ -177,3 +177,22 @@ describe('llmTraceToBus', () => {
     expect(String(events[0]!.error)).toContain('连接超时')
   })
 })
+
+describe('instrumentTools 会话标注', () => {
+  it('tool_start/tool_end 携带 context 的 sessionId 与 callId', async () => {
+    const bus = createEventBus()
+    const events = collect(bus)
+    const wrapped = wrapOne(okTool, bus)
+    await wrapped.execute!({ q: 'x' }, { signal: signal(), sessionId: 's-evt', callId: 'c-9' })
+    expect(events[0]).toMatchObject({ type: 'tool_start', sessionId: 's-evt', callId: 'c-9' })
+    expect(events[1]).toMatchObject({ type: 'tool_end', ok: true, sessionId: 's-evt', callId: 'c-9' })
+  })
+
+  it('无 sessionId 时不添加字段（兼容直接调用）', async () => {
+    const bus = createEventBus()
+    const events = collect(bus)
+    const wrapped = wrapOne(okTool, bus)
+    await wrapped.execute!({ q: 'x' }, { signal: signal() })
+    expect(events[0]).not.toHaveProperty('sessionId')
+  })
+})

@@ -20,7 +20,13 @@ export function instrumentTools(definitions: ToolDefinition[], bus: EventBus): T
     return {
       ...definition,
       execute: async (input, context) => {
-        bus.emit({ type: 'tool_start', name: definition.name, input: truncate(input) })
+        bus.emit({
+          type: 'tool_start',
+          name: definition.name,
+          input: truncate(input),
+          ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+          ...(context.callId ? { callId: context.callId } : {}),
+        })
         const startedAt = Date.now()
         try {
           const output = await original(input, context)
@@ -30,6 +36,8 @@ export function instrumentTools(definitions: ToolDefinition[], bus: EventBus): T
             ok: true,
             durationMs: Date.now() - startedAt,
             output: truncate(output),
+            ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+            ...(context.callId ? { callId: context.callId } : {}),
           })
           return output
         } catch (error) {
@@ -39,6 +47,8 @@ export function instrumentTools(definitions: ToolDefinition[], bus: EventBus): T
             ok: false,
             durationMs: Date.now() - startedAt,
             error: error instanceof Error ? error.message : String(error),
+            ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+            ...(context.callId ? { callId: context.callId } : {}),
           })
           // 必须原样抛出：harness 会捕获工具错误并转成 ok:false 结果回传给模型，
           // 改变异常类型会干扰该机制。
