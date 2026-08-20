@@ -221,6 +221,18 @@ export async function createFlutterDevBff(options: {
     })
   }
 
+  // 静态资源：只允许 assets/ 下的扁平文件名（无斜杠即无路径穿越），按扩展名给 content-type
+  app.get('/assets/*', (c) => {
+    const rel = c.req.path.slice('/assets/'.length)
+    if (!/^[\w.-]+$/.test(rel)) return c.notFound()
+    const filePath = join(publicDir, 'assets', rel)
+    if (!existsSync(filePath)) return c.notFound()
+    const ext = rel.slice(rel.lastIndexOf('.') + 1)
+    const contentType = ext === 'css' ? 'text/css; charset=utf-8' : ext === 'js' ? 'text/javascript; charset=utf-8' : 'application/octet-stream'
+    c.header('content-type', contentType)
+    return c.body(readFileSync(filePath))
+  })
+
   app.get('/api/sessions', (c) => {
     const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
     if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)

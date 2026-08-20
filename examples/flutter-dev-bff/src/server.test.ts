@@ -200,3 +200,21 @@ describe('WebUI 会话管理', () => {
     database.close()
   })
 })
+
+describe('静态资源路由', () => {
+  it('GET /assets/theme.css 返回 css', async () => {
+    const { app, database } = await bff()
+    const res = await app.request('/assets/theme.css')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/css')
+    expect(await res.text()).toContain('--bg:')
+    database.close()
+  })
+
+  it('路径穿越与不存在文件返回 404', async () => {
+    const { app, database } = await bff()
+    expect((await app.request('/assets/../src/server.ts')).status).toBe(404)
+    expect((await app.request('/assets/nope.css')).status).toBe(404)
+    database.close()
+  })
+})

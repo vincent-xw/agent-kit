@@ -1,0 +1,47 @@
+/* 主题变量：暗色为默认（与原配色一致），html[data-theme='light'] 覆盖为亮色。
+   应用侧变量由 index.html/app.css 消费，--doc-* 由文档页 docs.css 消费。 */
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --surface2: #0f3460;
+  --text: #e0e0e0;
+  --text2: #a0a0b0;
+  --accent: #4fc3f7;
+  --accent2: #66bb6a;
+  --error: #ef5350;
+  --border: #2a2a4a;
+  --tool-bg: #1e2a4a;
+  --tool-border: #2a3a5a;
+  --doc-bg: #0f1525;
+  --doc-surface: #16213e;
+  --doc-surface2: #1a2744;
+  --doc-text: #e0e6f0;
+  --doc-text2: #8a94a8;
+  --doc-accent: #4fc3f7;
+  --doc-accent2: #66bb6a;
+  --doc-border: #2a3a5a;
+  --doc-code-bg: #0a0f1c;
+}
+
+html[data-theme='light'] {
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface2: #e8eef7;
+  --text: #1a2333;
+  --text2: #5a6478;
+  --accent: #0288d1;
+  --accent2: #2e7d32;
+  --error: #d32f2f;
+  --border: #d7deeb;
+  --tool-bg: #eef2fa;
+  --tool-border: #dbe3f0;
+  --doc-bg: #f7f9fc;
+  --doc-surface: #ffffff;
+  --doc-surface2: #eef2f8;
+  --doc-text: #1a2333;
+  --doc-text2: #5a6478;
+  --doc-accent: #0288d1;
+  --doc-accent2: #2e7d32;
+  --doc-border: #dbe3f0;
+  --doc-code-bg: #eef1f7;
+}
