@@ -139,10 +139,10 @@ describe('WebUI 会话管理', () => {
     const patched = await app.request(`/api/sessions/${created.id}`, { method: 'PATCH', headers: auth, body: JSON.stringify({ title: '首页调试' }) })
     expect(patched.status).toBe(200)
 
-    // 有活动的会话排在前面：先给会话 A 写历史，再建会话 B
-    database.prepare('INSERT INTO agent_sessions (session_id, messages, updated_at) VALUES (?, ?, ?)')
-      .run(`flutter-dev:${created.id}`, '[]', new Date().toISOString())
+    // 先建较新的会话 B，再给 A 写入更晚的 agent 活动：有活动的 A 应排在前面
     const b = await (await app.request('/api/sessions', { method: 'POST', headers: auth, body: JSON.stringify({}) })).json() as { id: string }
+    database.prepare('INSERT INTO agent_sessions (session_id, messages, updated_at) VALUES (?, ?, ?)')
+      .run(`flutter-dev:${created.id}`, '[]', new Date(Date.now() + 60_000).toISOString())
 
     const list = await (await app.request('/api/sessions', { headers: auth })).json() as { sessions: Array<{ id: string; title: string }> }
     expect(list.sessions).toHaveLength(2)
