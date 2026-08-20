@@ -5,6 +5,10 @@ import type { LlmResult, SessionMessage, ToolCall, ToolSchema } from './contract
 export interface LlmDelta {
   content?: string
   reasoning?: string
+  /** 由运行时注入：本次补全所属会话，供事件流按会话路由。 */
+  sessionId?: string
+  /** 由运行时注入：同一次补全内相同、跨次不同，前端据此分轮渲染。 */
+  turnId?: string
 }
 
 /** LlmClient 配置：密钥、Base URL 与模型名来自受信任来源。 */
@@ -45,6 +49,8 @@ export interface LlmTraceEvent {
 export interface LlmClientRequest {
   input?: string
   context: Record<string, unknown>
+  /** 发起本次补全的会话标识，由 harness 注入；运行时据此给流式回调标注会话。 */
+  sessionId?: string
   messages: SessionMessage[]
   systemPrompt?: string
   /** 已注册工具的 JSON Schema 声明；为空或省略时不发送 tools 字段。 */

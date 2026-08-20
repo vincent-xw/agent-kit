@@ -38,6 +38,52 @@ describe('AgentHarness', () => {
     expect(requests).toHaveLength(2)
   })
 
+  it('服务端工具执行上下文携带 sessionId 与 callId', async () => {
+    const contexts: Array<{ sessionId?: string; callId?: string }> = []
+    const tools = createToolRegistry()
+    tools.register({
+      name: 'weather_read',
+      execution: 'server',
+      input: z.object({}),
+      output: z.object({ temperature: z.number() }),
+      execute: async (_input, context) => {
+        contexts.push(context)
+        return { temperature: 26 }
+      },
+    })
+    const requests: unknown[] = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          requests.push(request)
+          return requests.length === 1
+            ? callsOf({ callId: 'call-ctx', toolName: 'weather_read', input: {} })
+            : { type: 'final', output: '完成' }
+        },
+      },
+      sessions: createMemorySessionStore(), tools, maxSteps: 3,
+    })
+    await harness.run({ sessionId: 's-ctx', input: '查询', context: {} })
+    expect(contexts[0]).toMatchObject({ sessionId: 's-ctx', callId: 'call-ctx' })
+  })
+
+  it('LLM 补全请求携带 sessionId', async () => {
+    const requests: Array<{ sessionId?: string }> = []
+    const harness = createAgentHarness({
+      llm: {
+        complete: async (request) => {
+          requests.push(request)
+          return { type: 'final', output: '好的' }
+        },
+      },
+      sessions: createMemorySessionStore(),
+      tools: createToolRegistry(),
+      maxSteps: 3,
+    })
+    await harness.run({ sessionId: 's-req', input: 'hi', context: {} })
+    expect(requests[0]?.sessionId).toBe('s-req')
+  })
+
   it('远端工具返回待执行调用且不在服务端执行', async () => {
     const tools = createToolRegistry()
     tools.register({ name: 'browser_read_page', execution: 'remote', input: z.object({}), output: z.object({ title: z.string() }) })

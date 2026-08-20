@@ -86,6 +86,10 @@ export interface AuditLogger {
 /** 工具执行上下文：透传取消信号，使长时间运行的工具可被中止。 */
 export interface ToolExecutionContext {
   signal: AbortSignal
+  /** 本次调用所属会话，由 harness 注入；包装层可据此给事件标注会话。 */
+  sessionId?: string
+  /** 关联的调用 ID（与 tool 消息的 callId 对应），由 harness 注入。 */
+  callId?: string
 }
 
 /** 工具定义：Zod 输入/输出 Schema 与执行方式（服务端或远端 Tool Host）。 */

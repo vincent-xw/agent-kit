@@ -82,7 +82,13 @@ function createMemoryPendingCallStore(): PendingCallStore {
  * 在超时约束下执行服务端工具。
  * 没有超时的话，一个挂住的工具会永久挂住整个 harness 循环——调用方连失败都收不到。
  */
-async function executeWithTimeout(tool: ToolDefinition, input: unknown, timeoutMs: number): Promise<unknown> {
+async function executeWithTimeout(
+  tool: ToolDefinition,
+  input: unknown,
+  timeoutMs: number,
+  sessionId: string,
+  callId: string,
+): Promise<unknown> {
   if (!tool.execute) throw new AgentKitError('TOOL_EXECUTOR_MISSING', `服务端工具缺少执行器：${tool.name}`)
   const controller = new AbortController()
   let timedOut = false
@@ -91,7 +97,7 @@ async function executeWithTimeout(tool: ToolDefinition, input: unknown, timeoutM
     controller.abort()
   }, timeoutMs)
   try {
-    return await tool.execute(input, { signal: controller.signal })
+    return await tool.execute(input, { signal: controller.signal, sessionId, callId })
   } catch (error) {
     if (timedOut) {
       throw new AgentKitError('TOOL_EXECUTION_TIMEOUT', `工具执行超时：${tool.name}`, { cause: error })
@@ -174,6 +180,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         result = await deps.llm.complete({
           ...(pendingInput ? { input: pendingInput } : {}),
           context,
+          sessionId,
           messages: trimHistory(sessionId, history),
           ...(prompt?.prompt ? { systemPrompt: prompt.prompt } : {}),
           ...(toolSchemas.length > 0 ? { tools: toolSchemas } : {}),
@@ -238,7 +245,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
         // 但 Schema 校验失败是契约违约（工具定义与模型输出不匹配），必须直接抛出而不是喂回模型。
         let rawOutput: unknown
         try {
-          rawOutput = await executeWithTimeout(tool, parsedInput, tool.timeoutMs ?? toolTimeoutMs)
+          rawOutput = await executeWithTimeout(tool, parsedInput, tool.timeoutMs ?? toolTimeoutMs, sessionId, call.callId)
         } catch (error) {
           const code = error instanceof AgentKitError ? error.code : 'TOOL_EXECUTION_ABORTED'
           await deps.audit?.log({ requestId, durationMs: 0, toolName: call.toolName, errorCode: code })
