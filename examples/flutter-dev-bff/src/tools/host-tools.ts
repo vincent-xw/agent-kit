@@ -153,14 +153,17 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
       timeoutMs: 5000,
       async execute(raw) {
         const { title, message = '' } = raw as { title: string; message?: string }
-        try {
-          if (process.platform === 'darwin') {
-            const script = `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`
-            await execAsync(`osascript -e ${JSON.stringify(script)}`, { shell: '/bin/sh' })
-          } else {
-            await execAsync(`notify-send ${JSON.stringify(title)} ${JSON.stringify(message)}`, { shell: '/bin/sh' })
-          }
-        } catch { /* 静默降级 */ }
+        // 测试环境下不真弹系统通知，避免 vitest 跑出弹窗
+        if (!process.env.VITEST) {
+          try {
+            if (process.platform === 'darwin') {
+              const script = `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`
+              await execAsync(`osascript -e ${JSON.stringify(script)}`, { shell: '/bin/sh' })
+            } else {
+              await execAsync(`notify-send ${JSON.stringify(title)} ${JSON.stringify(message)}`, { shell: '/bin/sh' })
+            }
+          } catch { /* 静默降级 */ }
+        }
         return { ok: true }
       },
     },
