@@ -165,15 +165,31 @@ export class AdbClient {
     // 每次用唯一文件名，并先删除，避免 uiautomator 写文件失败/超时时
     // cat 读到上一次的旧内容，导致 LLM 拿到过时的屏幕。
     const remotePath = `/sdcard/agent_ui_${Date.now()}_${Math.floor(Math.random() * 100000)}.xml`
-    const dumpOutput = await this.exec(['-s', serial, 'shell', 'uiautomator', 'dump', remotePath], { timeoutMs: 30_000 })
-    // uiautomator dump 失败时输出不含成功标记，此时不读文件直接抛错，避免返回旧数据
-    if (!dumpOutput.includes('dumped to')) {
-      throw new Error(`uiautomator dump 失败：${dumpOutput.trim().slice(0, 200)}`)
+    // uiautomator dump 需要 UI idle。持续动画（轮播、loading、启动过渡）会
+    // 让 idle 永远不满足，报「could not get idle state」。此时降低单次超时、
+    // 快速失败并在动画停下的间隔后重试。
+    let lastError = ''
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000))
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          this.adbPath,
+          ['-s', serial, 'shell', 'uiautomator', 'dump', remotePath],
+          { timeout: 15_000, maxBuffer: 10 * 1024 * 1024 },
+        )
+        const dumpMsg = `${stdout}\n${stderr}`.trim()
+        if (dumpMsg.includes('dumped to')) {
+          const output = await this.exec(['-s', serial, 'shell', 'cat', remotePath], { timeoutMs: 10_000 })
+          await this.exec(['-s', serial, 'shell', 'rm', '-f', remotePath], { timeoutMs: 5_000 }).catch(() => {})
+          return output
+        }
+        lastError = dumpMsg || '(空输出)'
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e)
+      }
     }
-    const output = await this.exec(['-s', serial, 'shell', 'cat', remotePath], { timeoutMs: 10_000 })
-    // 读取后清理，避免残留
-    await this.exec(['-s', serial, 'shell', 'rm', '-f', remotePath], { timeoutMs: 5_000 }).catch(() => {})
-    return output
+    // 明确错误原因，让 LLM 知道是 UI 不稳定而非工具故障
+    throw new Error(`uiautomator dump 失败（重试 4 次）：${lastError.slice(0, 200)}。若为 could not get idle state，说明页面持续动画，请等待动画停止后重试或改用截图/视觉分析。`)
   }
 
   /** 读取设备当前激活的输入法 id。设备返回 null 或空白时返回空字符串。 */
