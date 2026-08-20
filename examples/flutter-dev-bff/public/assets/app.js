@@ -750,7 +750,63 @@ async function migrateLegacySession(legacyId) {
   }
 }
 
+// ── 会话边栏：拖拽调宽 + 收起/展开 ──
+const sidebar = $('sidebar')
+const sidebarToggle = $('sidebar-toggle')
+const sidebarResize = $('sidebar-resize')
+const SIDEBAR_MIN_W = 160
+
+/** 读回上次宽度并钳制到 [MIN, 屏宽一半]，超限部分回退默认。 */
+function applySidebarWidth() {
+  const max = Math.floor(window.innerWidth / 2)
+  const saved = parseFloat(localStorage.getItem('sidebar_width'))
+  const w = !Number.isNaN(saved) && saved >= SIDEBAR_MIN_W ? Math.max(SIDEBAR_MIN_W, Math.min(max, saved)) : 240
+  sidebar.style.setProperty('--sidebar-w', `${Math.min(w, max)}px`)
+  return w
+}
+
+function applySidebarCollapsed() {
+  const collapsed = localStorage.getItem('sidebar_collapsed') === '1'
+  sidebar.classList.toggle('collapsed', collapsed)
+  sidebarToggle.textContent = collapsed ? '»' : '«'
+  sidebarToggle.title = collapsed ? '展开会话列表' : '收起会话列表'
+}
+
+sidebarToggle.addEventListener('click', () => {
+  const collapsed = !sidebar.classList.contains('collapsed')
+  sidebar.classList.toggle('collapsed', collapsed)
+  localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0')
+  applySidebarCollapsed()
+})
+
+sidebarResize.addEventListener('pointerdown', (e) => {
+  if (sidebar.classList.contains('collapsed')) return
+  e.preventDefault()
+  sidebar.classList.add('resizing')
+  document.body.style.cursor = 'col-resize'
+  const startX = e.clientX
+  const startW = sidebar.offsetWidth
+  const max = Math.floor(window.innerWidth / 2)
+  const move = (ev) => {
+    const w = Math.max(SIDEBAR_MIN_W, Math.min(max, startW + (ev.clientX - startX)))
+    sidebar.style.setProperty('--sidebar-w', `${w}px`)
+  }
+  const up = () => {
+    sidebar.classList.remove('resizing')
+    document.body.style.cursor = ''
+    localStorage.setItem('sidebar_width', sidebar.offsetWidth.toString())
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+})
+
+window.addEventListener('resize', () => { applySidebarWidth() })
+
 async function init() {
+  applySidebarWidth()
+  applySidebarCollapsed()
   await refreshSessions()
   const legacy = localStorage.getItem('flutter_session_id')
   let target = null

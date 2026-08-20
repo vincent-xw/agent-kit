@@ -3,7 +3,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 
 /* 布局：左侧会话边栏 + 右侧主区 */
 #app { display: flex; height: 100vh; }
-#sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+#sidebar { position: relative; width: var(--sidebar-w, 240px); flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 12px; gap: 10px; overflow: hidden; transition: width .22s ease, border-color .22s ease, padding .22s ease; }
+#sidebar.resizing { transition: none; user-select: none; }
+#sidebar.collapsed { width: 0; padding-left: 0; padding-right: 0; border-right: none; }
+#sidebar.collapsed #sidebar-resize { opacity: 0; pointer-events: none; }
+#sidebar-resize { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+#sidebar-resize:hover { background: linear-gradient(to right, transparent, var(--accent)); opacity: .35; }
+#sidebar-resize:active { background: linear-gradient(to right, transparent, var(--accent)); opacity: .7; }
+#sidebar-toggle { padding: 4px 8px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text2); font-size: 13px; cursor: pointer; line-height: 1; }
+#sidebar-toggle:hover { color: var(--text); border-color: var(--accent); }
 #new-session-btn { padding: 10px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
 #new-session-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
