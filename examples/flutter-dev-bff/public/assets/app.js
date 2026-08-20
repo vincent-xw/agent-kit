@@ -88,8 +88,8 @@ async function switchSession(sessionId) {
   currentSessionId = sessionId
   localStorage.setItem('flutter_session_id', sessionId)
   renderSessionList()
-  showSession(sessionId)
   const view = getView(sessionId)
+  showSession(sessionId)
   if (!view.loaded) {
     view.loaded = true
     await restoreHistory(sessionId, view)

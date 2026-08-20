@@ -221,6 +221,14 @@ export async function createFlutterDevBff(options: {
     })
   }
 
+  // 文档页样式
+  app.get('/docs.css', (c) => {
+    const filePath = join(publicDir, 'docs.css')
+    if (!existsSync(filePath)) return c.notFound()
+    c.header('content-type', 'text/css; charset=utf-8')
+    return c.body(readFileSync(filePath))
+  })
+
   // 静态资源：只允许 assets/ 下的扁平文件名（无斜杠即无路径穿越），按扩展名给 content-type
   app.get('/assets/*', (c) => {
     const rel = c.req.path.slice('/assets/'.length)
