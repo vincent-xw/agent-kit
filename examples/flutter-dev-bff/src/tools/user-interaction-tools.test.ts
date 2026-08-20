@@ -18,7 +18,7 @@ describe('用户交互工具', () => {
     let lastCallId = ''
     const events: unknown[] = []
     const ask = createAskService({
-      emit: (e) => { events.push(e); const c = e as { callId: string }; lastCallId = c.callId },
+      emit: (e) => { events.push(e); lastCallId = String((e as Record<string, unknown>).callId ?? '') },
     })
     const tools = createUserInteractionToolDefinitions({ ask })
     return { ask, tools, getLast: () => lastCallId }
