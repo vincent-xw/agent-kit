@@ -82,6 +82,16 @@
       </label>
     </div>
     <div class="setting-row">
+      <div style="width:100%">
+        <div class="label">工作区根目录</div>
+        <div class="desc">host 文件读写与命令的根（路径越界会被拒绝）。</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input id="setting-workspace" class="rename-input" type="text" placeholder="/path/to/workspace" style="flex:1">
+          <button id="setting-workspace-save" style="padding:6px 12px;background:var(--accent);color:var(--bg);border:none;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap">保存</button>
+        </div>
+      </div>
+    </div>
+    <div class="setting-row">
       <div>
         <div class="label">复制时工具输出上限</div>
         <div class="desc">一键复制上下文中每条工具输出的最大字符数</div>

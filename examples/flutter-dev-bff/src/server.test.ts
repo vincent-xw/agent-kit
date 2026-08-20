@@ -261,4 +261,18 @@ describe('辅助工具端点', () => {
     expect((await other.json() as { trustedHost?: boolean }).trustedHost).toBe(false)
     database.close()
   })
+  it('GET/POST /api/workspace 读写全局工作区', async () => {
+    const { app, database } = await bff()
+    const get = await app.request('/api/workspace', { headers: { authorization: 'Bearer token-1' } })
+    expect((await get.json() as { workspace?: string }).workspace).toBeTruthy()
+    const post = await app.request('/api/workspace', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer token-1' },
+      body: JSON.stringify({ workspace: '/Users/x/ws' }),
+    })
+    expect((await post.json() as { ok?: boolean }).ok).toBe(true)
+    const get2 = await app.request('/api/workspace', { headers: { authorization: 'Bearer token-1' } })
+    expect((await get2.json() as { workspace?: string }).workspace).toBe('/Users/x/ws')
+    database.close()
+  })
 })

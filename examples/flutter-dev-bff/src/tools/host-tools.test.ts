@@ -14,7 +14,7 @@ function makeSvcs(root: string, opts: { trusted?: boolean } = {}) {
   const ask = createAskService({ emit: () => {} })
   const policy = createHostPolicyService()
   if (opts.trusted) policy.setTrusted('flutter-dev:s1', true)
-  const svcs: HostToolServices = { workspaceRoot: root, ask, policy }
+  const svcs: HostToolServices = { workspaceRoot: () => root, ask, policy }
   return { svcs, ask }
 }
 

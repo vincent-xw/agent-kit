@@ -586,6 +586,20 @@ trustedHostEl.addEventListener('change', async () => {
   }).catch(() => {})
 })
 
+// 全局当前工作区：载入回显，保存 PATCH 到服务端
+const workspaceInputEl = $('setting-workspace')
+async function loadWorkspace() {
+  try {
+    const data = await api('/api/workspace')
+    workspaceInputEl.value = data.workspace || ''
+  } catch { /* 忽略 */ }
+}
+$('setting-workspace-save').addEventListener('click', async () => {
+  const ws = workspaceInputEl.value.trim()
+  if (!ws) return
+  await api('/api/workspace', { method: 'POST', body: JSON.stringify({ workspace: ws }) }).catch(() => {})
+})
+
 function applyToolDetailSetting() {
   for (const view of views.values()) {
     view.el.querySelectorAll('.msg.tool').forEach((el) => el.classList.toggle('compact', !showToolDetails))
@@ -917,6 +931,7 @@ async function init() {
   if (!target) target = sessions[0]?.id ?? (await createSession())
   await switchSession(target)
   loadTrustedHost()
+  loadWorkspace()
   connectEvents()
 }
 

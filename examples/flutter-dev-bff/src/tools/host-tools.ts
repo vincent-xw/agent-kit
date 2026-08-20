@@ -15,7 +15,7 @@ export function msg(error: unknown): string {
 }
 
 export interface HostToolServices {
-  workspaceRoot: string
+  workspaceRoot: () => string
   ask: AskService
   policy: HostPolicyService
 }
@@ -69,7 +69,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
       timeoutMs: 15_000,
       async execute(raw) {
         try {
-          const dir0 = assertInsideRoot(svc.workspaceRoot, (raw as { path: string }).path)
+          const dir0 = assertInsideRoot(svc.workspaceRoot(), (raw as { path: string }).path)
           const entries = await readdir(dir0, { withFileTypes: true })
           const out = await Promise.all(entries.map(async (e) => {
             const st = await statSafe(join(dir0, e.name))
@@ -95,7 +95,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
       timeoutMs: 15_000,
       async execute(raw) {
         try {
-          const abs = assertInsideRoot(svc.workspaceRoot, (raw as { path: string }).path)
+          const abs = assertInsideRoot(svc.workspaceRoot(), (raw as { path: string }).path)
           const buf = await readFile(abs)
           if (buf.includes(0)) return { ok: false, error: '是二进制文件，无法作为文本读取' }
           const text = buf.toString('utf8')
@@ -116,7 +116,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         const { path, content, mode = 'overwrite' } = raw as { path: string; content: string; mode?: string }
         let abs: string
         try {
-          abs = assertInsideRoot(svc.workspaceRoot, path)
+          abs = assertInsideRoot(svc.workspaceRoot(), path)
         } catch (error) {
           return { ok: false, error: msg(error) }
         }
@@ -148,7 +148,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         const { command, cwd, timeoutMs } = raw as { command: string; cwd?: string; timeoutMs?: number }
         let cwdAbs: string | undefined
         if (cwd) {
-          try { cwdAbs = assertInsideRoot(svc.workspaceRoot, cwd) } catch { return { ok: false, error: 'cwd outside workspace' } }
+          try { cwdAbs = assertInsideRoot(svc.workspaceRoot(), cwd) } catch { return { ok: false, error: 'cwd outside workspace' } }
         }
         const { sessionId, callId } = hostCtx(context)
         if (!await confirmIfNeeded(svc, sessionId, callId, `允许执行命令：${command.slice(0, 200)}？`)) {
@@ -156,10 +156,10 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         }
         try {
           const out = await execAsync(command, {
-            cwd: cwdAbs ?? svc.workspaceRoot,
+            cwd: cwdAbs ?? svc.workspaceRoot(),
             timeout: timeoutMs ?? 60_000,
             maxBuffer: EXEC_OUT_MAX * 2,
-            shell: '/bin/bash',
+            shell: '/bin/sh',
           })
           return { ok: true, stdout: String(out.stdout ?? '').slice(0, EXEC_OUT_MAX), stderr: String(out.stderr ?? '').slice(0, EXEC_OUT_MAX), exitCode: 0 }
         } catch (error) {
@@ -187,9 +187,9 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         try {
           if (process.platform === 'darwin') {
             const script = `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`
-            await execAsync(`osascript -e ${JSON.stringify(script)}`, { shell: '/bin/bash' })
+            await execAsync(`osascript -e ${JSON.stringify(script)}`, { shell: '/bin/sh' })
           } else {
-            await execAsync(`notify-send ${JSON.stringify(title)} ${JSON.stringify(message)}`, { shell: '/bin/bash' })
+            await execAsync(`notify-send ${JSON.stringify(title)} ${JSON.stringify(message)}`, { shell: '/bin/sh' })
           }
         } catch { /* 静默降级 */ }
         return { ok: true }
@@ -235,7 +235,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         const pasteCmd = process.platform === 'darwin' ? 'pbpaste' : 'xclip -selection clipboard -o'
         if (action === 'read') {
           try {
-            const { stdout } = await execAsync(pasteCmd, { shell: '/bin/bash', maxBuffer: 1024 * 1024 })
+            const { stdout } = await execAsync(pasteCmd, { shell: '/bin/sh', maxBuffer: 1024 * 1024 })
             return { ok: true, text: String(stdout ?? '').slice(0, TEXT_MAX) }
           } catch {
             return { ok: false, error: `${process.platform === 'darwin' ? 'pbpaste' : 'xclip'} 不可用` }
@@ -244,7 +244,7 @@ export function createHostToolDefinitions(svc: HostToolServices): ToolDefinition
         const { sessionId, callId } = hostCtx(context)
         if (!await confirmIfNeeded(svc, sessionId, callId, '允许写入剪贴板吗？')) return { ok: false, denied: true }
         try {
-          await execAsync(`printf %s ${JSON.stringify(text ?? '')} | ${copyCmd}`, { shell: '/bin/bash' })
+          await execAsync(`printf %s ${JSON.stringify(text ?? '')} | ${copyCmd}`, { shell: '/bin/sh' })
           return { ok: true }
         } catch (error) {
           return { ok: false, error: msg(error) }

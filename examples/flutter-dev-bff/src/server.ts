@@ -47,9 +47,10 @@ import { CdpClient } from './services/webview/cdp-client.js'
 import { ToolLoader } from './services/tool-loader.js'
 import { createAskService } from './services/ask-service.js'
 import { createHostPolicyService } from './services/host-policy.js'
+import { createWorkspaceStore } from './services/workspace-store.js'
 import { createHostToolDefinitions } from './tools/host-tools.js'
 import { createUserInteractionToolDefinitions } from './tools/user-interaction-tools.js'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { VisionClient } from './services/vision-client.js'
 import type { VisionClientConfig } from './services/vision-client.js'
 import { SkillStore } from './services/skill-store.js'
@@ -131,9 +132,15 @@ export async function createFlutterDevBff(options: {
   // 阻塞式交互底座 + 会话级权限 + 新工具集
   const askService = createAskService(bus)
   const hostPolicy = createHostPolicyService()
-  const workspaceRoot = options.flutterProjectPath
+  // 全局当前工作区：默认取 FLUTTER_PROJECT_PATH（存在时），否则进程 cwd；可在 UI 修改并持久化
+  const workspaceStore = createWorkspaceStore({
+    filePath: (options.databasePath ?? 'flutter-dev-bff.sqlite') === ':memory:'
+      ? join(tmpdir(), 'ak-bff-settings.json')
+      : join(dirname(options.databasePath ?? 'flutter-dev-bff.sqlite'), 'bff-settings.json'),
+    fallback: existsSync(options.flutterProjectPath) ? options.flutterProjectPath : process.cwd(),
+  })
   const userToolDefs = createUserInteractionToolDefinitions({ ask: askService })
-  const hostToolDefs = createHostToolDefinitions({ workspaceRoot, ask: askService, policy: hostPolicy })
+  const hostToolDefs = createHostToolDefinitions({ workspaceRoot: () => workspaceStore.get(), ask: askService, policy: hostPolicy })
 
   // 插件工具与内置工具合并，同名以插件为准（Map 去重）
   let finalTools = new Map([...toolDefinitions, ...userToolDefs, ...hostToolDefs, ...pluginTools].map((t) => [t.name, t]))
@@ -358,6 +365,24 @@ export async function createFlutterDevBff(options: {
     const scopedId = `flutter-dev:${c.req.param('sessionId')}`
     hostPolicy.setTrusted(scopedId, trusted)
     return c.json({ ok: true })
+  })
+
+  // 全局当前工作区（host 工具读写的根）
+  app.get('/api/workspace', (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    return c.json({ workspace: workspaceStore.get() })
+  })
+  app.post('/api/workspace', async (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const body = await c.req.json().catch(() => ({}))
+    const workspace = typeof (body as { workspace?: unknown }).workspace === 'string'
+      ? (body as { workspace: string }).workspace.trim()
+      : ''
+    if (!workspace) return c.json({ error: 'workspace is required' }, 400)
+    workspaceStore.set(workspace)
+    return c.json({ ok: true, workspace })
   })
 
   // ── Skills ──────────────────────────────────────────────
