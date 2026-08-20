@@ -14,6 +14,13 @@ let running = false
 let stopRequested = false
 let showToolDetails = localStorage.getItem('show_tool_details') === '1'
 
+// BFF 在 harness 调用前会给 sessionId 加上身份前缀（如 flutter-dev:xxx），
+// 但 WebUI 的会话列表、视图与 localStorage 都使用原始 id，因此事件需要归一化。
+const SUBJECT_PREFIX = 'flutter-dev:'
+function normalizeSessionId(id) {
+  return typeof id === 'string' && id.startsWith(SUBJECT_PREFIX) ? id.slice(SUBJECT_PREFIX.length) : id
+}
+
 function escapeHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -146,7 +153,6 @@ function startRename(item) {
 }
 
 $('new-session-btn').addEventListener('click', async () => {
-  if (running) return
   const id = await createSession()
   await switchSession(id)
 })
@@ -155,7 +161,7 @@ $('new-session-btn').addEventListener('click', async () => {
 const dotTimers = new Map()
 
 function touchActivityDot(sessionId) {
-  const dot = document.querySelector(`[data-dot="${CSS.escape(sessionId)}"]`)
+  const dot = document.querySelector(`[data-dot="${CSS.escape(normalizeSessionId(sessionId))}"]`)
   if (!dot) return
   dot.classList.add('on')
   clearTimeout(dotTimers.get(sessionId))
@@ -272,8 +278,9 @@ async function restoreHistory(sessionId, view) {
 // ── SSE：事件按 sessionId 路由到对应容器 ──
 function routeEvent(event, seq, render) {
   if (!event.sessionId) return
-  touchActivityDot(event.sessionId)
-  const view = views.get(event.sessionId)
+  const sessionId = normalizeSessionId(event.sessionId)
+  touchActivityDot(sessionId)
+  const view = views.get(sessionId)
   if (!view) return
   if (seq > 0 && seq <= view.lastSeq) return // 断线重连重放去重
   if (seq > view.lastSeq) view.lastSeq = seq
