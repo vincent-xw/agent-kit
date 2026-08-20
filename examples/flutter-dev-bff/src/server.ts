@@ -127,6 +127,14 @@ export async function createFlutterDevBff(options: {
 
   const bus = createEventBus()
 
+  // WebUI 会话元数据：标题等纯展示信息；消息本体在 agent_sessions（前缀 flutter-dev:）
+  database.exec(`CREATE TABLE IF NOT EXISTS webui_sessions (
+    session_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`)
+
   const prompts = createPromptRegistry()
   prompts.register({ name: 'free-form', version: '1', prompt: freeFormPrompt })
   prompts.register({ name: 'debugging', version: '1', prompt: debuggingPrompt })
@@ -211,6 +219,56 @@ export async function createFlutterDevBff(options: {
       return c.body(readFileSync(filePath))
     })
   }
+
+  app.get('/api/sessions', (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const rows = database.prepare(`
+      SELECT w.session_id AS id, w.title AS title,
+             COALESCE(a.updated_at, w.updated_at) AS updatedAt
+      FROM webui_sessions w
+      LEFT JOIN agent_sessions a ON a.session_id = 'flutter-dev:' || w.session_id
+      ORDER BY updatedAt DESC
+    `).all() as Array<{ id: string; title: string; updatedAt: string }>
+    return c.json({ sessions: rows })
+  })
+
+  app.post('/api/sessions', async (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const body = await c.req.json<{ id?: unknown; title?: unknown }>().catch(() => ({}) as { id?: unknown; title?: unknown })
+    const id = typeof body.id === 'string' && /^[\w-]+$/.test(body.id)
+      ? body.id
+      : 'sess-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    if (database.prepare('SELECT 1 FROM webui_sessions WHERE session_id = ?').get(id)) {
+      return c.json({ error: 'session exists' }, 409)
+    }
+    const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 60) : '新会话'
+    const now = new Date().toISOString()
+    database.prepare('INSERT INTO webui_sessions (session_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)').run(id, title, now, now)
+    return c.json({ id, title })
+  })
+
+  app.patch('/api/sessions/:sessionId', async (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const body = await c.req.json<{ title?: unknown }>().catch(() => ({}) as { title?: unknown })
+    if (typeof body.title !== 'string' || !body.title.trim()) return c.json({ error: 'title required' }, 400)
+    const result = database
+      .prepare('UPDATE webui_sessions SET title = ?, updated_at = ? WHERE session_id = ?')
+      .run(body.title.trim().slice(0, 60), new Date().toISOString(), c.req.param('sessionId'))
+    if (Number(result.changes) === 0) return c.json({ error: 'not found' }, 404)
+    return c.json({ ok: true })
+  })
+
+  app.delete('/api/sessions/:sessionId', (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const id = c.req.param('sessionId')
+    database.prepare('DELETE FROM webui_sessions WHERE session_id = ?').run(id)
+    database.prepare('DELETE FROM agent_sessions WHERE session_id = ?').run(`flutter-dev:${id}`)
+    return c.json({ ok: true })
+  })
 
   app.get('/api/sessions/:sessionId/messages', (c) => {
     const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
