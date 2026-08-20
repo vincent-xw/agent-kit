@@ -1,0 +1,138 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+
+/* 布局：左侧会话边栏 + 右侧主区 */
+#app { display: flex; height: 100vh; }
+#sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+#new-session-btn { padding: 10px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+#new-session-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.session-item { position: relative; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.session-item:hover { background: var(--tool-bg); }
+.session-item.active { background: var(--surface2); }
+.session-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px; }
+.session-time { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.activity-dot { position: absolute; top: 10px; right: 28px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent2); opacity: 0; transition: opacity 0.2s; }
+.activity-dot.on { opacity: 1; }
+.session-delete { display: none; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text2); font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.session-item:hover .session-delete { display: block; }
+.session-delete:hover { color: var(--error); background: var(--tool-bg); }
+.rename-input { width: 100%; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; color: var(--text); font-size: 13px; padding: 2px 4px; font-family: inherit; }
+.rename-input:focus { outline: none; }
+
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+header { padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+header h1 { font-size: 16px; font-weight: 600; }
+header .status { font-size: 12px; color: var(--text2); }
+header .status.connected { color: var(--accent2); }
+
+/* 消息区：滚动宿主 + 每会话一个容器 */
+#messages { flex: 1; overflow-y: auto; }
+.session-messages { display: none; flex-direction: column; gap: 12px; padding: 20px; }
+.session-messages.active { display: flex; }
+.msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: var(--surface2); color: var(--text); border-bottom-right-radius: 4px; }
+.msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg.tool { align-self: flex-start; background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px 12px; font-size: 13px; max-width: 90%; }
+.msg.tool .tool-name { font-weight: 600; color: var(--accent); }
+.msg.tool .tool-status { color: var(--text2); font-size: 12px; }
+.source-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; margin: 0 6px; background: var(--border); color: var(--text2); vertical-align: middle; }
+.source-badge.companion { background: var(--accent2); color: var(--bg); }
+.tool-io { margin-top: 6px; }
+.tool-io-label { color: var(--text2); font-size: 11px; margin-bottom: 2px; }
+.msg.tool .tool-output { color: var(--text2); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+.msg.error { border-color: var(--error); color: var(--error); }
+.msg img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+.msg code { background: rgba(128,128,128,0.15); padding: 1px 5px; border-radius: 3px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+.msg pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+.msg pre code { background: none; padding: 0; }
+
+#input-bar { padding: 16px 20px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 10px; }
+#input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 14px; resize: none; min-height: 42px; max-height: 120px; font-family: inherit; }
+#input:focus { outline: none; border-color: var(--accent); }
+#send { padding: 8px 20px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+#send:disabled { opacity: 0.5; cursor: not-allowed; }
+#stop { padding: 8px 20px; background: transparent; color: var(--error); border: 1px solid var(--error); border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.hidden { display: none !important; }
+.typing { display: inline-flex; gap: 4px; }
+.typing span { width: 6px; height: 6px; background: var(--text2); border-radius: 50%; animation: blink 1.4s infinite; }
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+.prompt-select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+
+/* 设置 */
+#settings-btn { background: transparent; color: var(--text2); border: none; cursor: pointer; font-size: 18px; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+#settings-btn:hover { background: var(--tool-bg); color: var(--text); }
+#settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
+#settings-overlay.open { display: flex; }
+#settings-panel { width: 320px; max-width: 90vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+#settings-panel h2 { font-size: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+#settings-panel h2 button { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.setting-row .label { font-size: 14px; }
+.setting-row .desc { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.setting-select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; flex-shrink: 0; margin-left: 16px; }
+.switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; margin-left: 16px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; inset: 0; background: var(--border); border-radius: 22px; cursor: pointer; transition: 0.2s; }
+.switch .slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--text2); border-radius: 50%; transition: 0.2s; }
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); background: var(--bg); }
+.msg.tool.compact .tool-output, .msg.tool.compact .tool-io { display: none; }
+.msg.tool.compact { padding: 4px 10px; font-size: 12px; opacity: 0.8; }
+
+/* Skills 面板 */
+#skills-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+#skills-btn:hover { border-color: var(--accent); color: var(--accent); }
+#docs-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 16px; cursor: pointer; line-height: 1.2; }
+#docs-btn:hover { border-color: var(--accent); color: var(--accent); }
+#copy-context-btn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1.2; }
+#copy-context-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+#skills-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: flex-start; justify-content: flex-end; }
+#skills-overlay.open { display: flex; }
+#skills-panel { width: 420px; max-width: 92vw; height: 100%; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+#skills-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#skills-panel h2 { font-size: 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+#skills-panel h2 button { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+#skills-tabs { display: flex; gap: 0; }
+#skills-tabs .tab { padding: 4px 12px; cursor: pointer; font-size: 13px; border-radius: 6px 6px 0 0; color: var(--text2); }
+#skills-tabs .tab.active { color: var(--text); background: var(--bg); }
+.skill-card { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; cursor: pointer; transition: border-color 0.15s; }
+.skill-card:hover { border-color: var(--accent); }
+.skill-card .skill-name { font-weight: 600; color: var(--text); font-size: 14px; }
+.skill-card .skill-desc { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.skill-card .skill-meta { font-size: 11px; color: var(--text2); margin-top: 6px; display: flex; gap: 8px; align-items: center; }
+.skill-card .skill-meta .run-count { background: var(--surface2); padding: 1px 6px; border-radius: 10px; }
+.skill-card .skill-actions { margin-top: 8px; display: flex; gap: 6px; }
+.skill-card .skill-actions button { font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+.btn-primary { background: var(--accent); color: var(--bg); border: none; font-weight: 600; }
+.btn-secondary { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-danger { background: transparent; color: var(--error); border: 1px solid var(--error); }
+#skill-form { display: flex; flex-direction: column; gap: 10px; }
+#skill-form label { font-size: 12px; color: var(--text2); }
+#skill-form input, #skill-form textarea { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; }
+#skill-form textarea { min-height: 180px; resize: vertical; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.5; }
+#skill-form .form-actions { display: flex; gap: 8px; margin-top: 4px; }
+#skill-form .form-actions button { flex: 1; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+#intent-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; color: var(--text); font-size: 14px; width: 100%; flex: 1; min-height: 120px; font-family: inherit; resize: none; scrollbar-width: none; -ms-overflow-style: none; line-height: 1.6; }
+#intent-input::-webkit-scrollbar { display: none; }
+#intent-input:focus { outline: none; border-color: var(--accent); }
+#new-skill-form { display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
+#new-skill-form > .back { flex-shrink: 0; }
+#new-skill-form h3 { flex-shrink: 0; font-size: 15px; margin: 4px 0; }
+#new-skill-form .form-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 8px; }
+#new-skill-form .form-actions button { flex: 1; padding: 11px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
+#generate-status { min-height: 20px; }
+.empty-state { text-align: center; color: var(--text2); font-size: 13px; padding: 40px 20px; line-height: 1.8; }
+.generating { color: var(--accent); font-size: 12px; text-align: center; padding: 12px; }
+.skill-detail { display: flex; flex-direction: column; gap: 10px; }
+.skill-detail .back, .back { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0; text-align: left; flex-shrink: 0; align-self: flex-start; }
+.back:hover { text-decoration: underline; }
+.skill-detail pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 11px; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.runs-list { font-size: 12px; }
+.run-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 6px; }
+.run-item .run-status { font-weight: 600; }
+.run-item .run-status.completed { color: var(--accent2); }
+.run-item .run-status.failed { color: var(--error); }
+.run-item .run-time { color: var(--text2); font-size: 11px; }

@@ -99,11 +99,16 @@ describe('flutter-dev-bff 工具执行', () => {
 })
 
 describe('flutter-dev-bff Web 路由', () => {
-  it('GET / 返回 HTML', async () => {
+  it('GET / 返回新结构 HTML', async () => {
     const { app, database } = await bff()
     const res = await app.request('/')
     // public/index.html 可能不在 dist 旁边，但状态码不应是 500
     expect([200, 404]).toContain(res.status)
+    if (res.status === 200) {
+      const html = await res.text()
+      expect(html).toContain('id="session-list"')
+      expect(html).toContain('/assets/app.js')
+    }
     database.close()
   })
 })
