@@ -223,3 +223,42 @@ describe('静态资源路由', () => {
     database.close()
   })
 })
+
+describe('辅助工具端点', () => {
+  it('POST /api/sessions/:id/asks/:callId 无 pending 时返回 404', async () => {
+    const { app, database } = await bff()
+    const res = await app.request('/api/sessions/s1/asks/nope', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer token-1' },
+      body: JSON.stringify({ answer: '允许' }),
+    })
+    expect(res.status).toBe(404)
+    database.close()
+  })
+  it('未鉴权的 asks 回填返回 401', async () => {
+    const { app, database } = await bff()
+    const res = await app.request('/api/sessions/s1/asks/c1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ answer: '允许' }),
+    })
+    expect(res.status).toBe(401)
+    database.close()
+  })
+  it('GET/POST 受信任 host 设置按会话读写', async () => {
+    const { app, database } = await bff()
+    const get = await app.request('/api/sessions/s1/settings', { headers: { authorization: 'Bearer token-1' } })
+    expect((await get.json() as { trustedHost?: boolean }).trustedHost).toBe(false)
+    const post = await app.request('/api/sessions/s1/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer token-1' },
+      body: JSON.stringify({ trustedHost: true }),
+    })
+    expect((await post.json() as { ok?: boolean }).ok).toBe(true)
+    const get2 = await app.request('/api/sessions/s1/settings', { headers: { authorization: 'Bearer token-1' } })
+    expect((await get2.json() as { trustedHost?: boolean }).trustedHost).toBe(true)
+    const other = await app.request('/api/sessions/s2/settings', { headers: { authorization: 'Bearer token-1' } })
+    expect((await other.json() as { trustedHost?: boolean }).trustedHost).toBe(false)
+    database.close()
+  })
+})

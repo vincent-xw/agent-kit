@@ -45,6 +45,10 @@ import { ScreenshotStore } from './services/screenshot-store.js'
 import { createEventBus } from './services/event-bus.js'
 import { CdpClient } from './services/webview/cdp-client.js'
 import { ToolLoader } from './services/tool-loader.js'
+import { createAskService } from './services/ask-service.js'
+import { createHostPolicyService } from './services/host-policy.js'
+import { createHostToolDefinitions } from './tools/host-tools.js'
+import { createUserInteractionToolDefinitions } from './tools/user-interaction-tools.js'
 import { homedir } from 'node:os'
 import { VisionClient } from './services/vision-client.js'
 import type { VisionClientConfig } from './services/vision-client.js'
@@ -99,6 +103,8 @@ export async function createFlutterDevBff(options: {
 
   let vmClient: VmServiceClient | null = null
 
+  const bus = createEventBus()
+
   const toolDefinitions = createFlutterToolDefinitions({
     adb,
     device,
@@ -122,11 +128,16 @@ export async function createFlutterDevBff(options: {
     ...(options.vision ? { vision: new VisionClient(options.vision) } : {}),
   })
 
-  // 插件工具与内置工具合并，同名以插件为准（Map 去重）
-  let finalTools = new Map([...toolDefinitions, ...pluginTools].map((t) => [t.name, t]))
-  const finalToolList = [...finalTools.values()]
+  // 阻塞式交互底座 + 会话级权限 + 新工具集
+  const askService = createAskService(bus)
+  const hostPolicy = createHostPolicyService()
+  const workspaceRoot = options.flutterProjectPath
+  const userToolDefs = createUserInteractionToolDefinitions({ ask: askService })
+  const hostToolDefs = createHostToolDefinitions({ workspaceRoot, ask: askService, policy: hostPolicy })
 
-  const bus = createEventBus()
+  // 插件工具与内置工具合并，同名以插件为准（Map 去重）
+  let finalTools = new Map([...toolDefinitions, ...userToolDefs, ...hostToolDefs, ...pluginTools].map((t) => [t.name, t]))
+  const finalToolList = [...finalTools.values()]
 
   // WebUI 会话元数据：标题等纯展示信息；消息本体在 agent_sessions（前缀 flutter-dev:）
   database.exec(`CREATE TABLE IF NOT EXISTS webui_sessions (
@@ -315,6 +326,38 @@ export async function createFlutterDevBff(options: {
     const meta = database.prepare('SELECT title FROM webui_sessions WHERE session_id = ?').get(id) as { title?: string } | undefined
     c.header('content-type', 'text/markdown; charset=utf-8')
     return c.body(renderSessionMarkdown(meta?.title ?? id, messages, toolOutputLimit))
+  })
+
+  // 问询/审批回填：callId 必须属于该会话且未决
+  app.post('/api/sessions/:sessionId/asks/:callId', async (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const body = await c.req.json().catch(() => ({}))
+    const answer = (body as { answer?: unknown }).answer
+    if (answer === undefined) return c.json({ error: 'answer is required' }, 400)
+    const scopedId = `flutter-dev:${c.req.param('sessionId')}`
+    const ok = askService.resolve(scopedId, c.req.param('callId'), answer as string | string[])
+    if (!ok) return c.json({ error: 'no pending ask for this callId' }, 404)
+    return c.json({ ok: true })
+  })
+
+  // 受信任 host 模式开关（按会话）
+  app.get('/api/sessions/:sessionId/settings', (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const scopedId = `flutter-dev:${c.req.param('sessionId')}`
+    return c.json({ trustedHost: hostPolicy.isTrusted(scopedId) })
+  })
+  app.post('/api/sessions/:sessionId/settings', async (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const body = await c.req.json().catch(() => ({}))
+    const trusted = typeof (body as { trustedHost?: unknown }).trustedHost === 'boolean'
+      ? (body as { trustedHost: boolean }).trustedHost
+      : false
+    const scopedId = `flutter-dev:${c.req.param('sessionId')}`
+    hostPolicy.setTrusted(scopedId, trusted)
+    return c.json({ ok: true })
   })
 
   // ── Skills ──────────────────────────────────────────────
