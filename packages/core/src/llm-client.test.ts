@@ -187,4 +187,36 @@ describe('usage parsing', () => {
     const responseEvent = events.find((e) => e.phase === 'response')
     expect(responseEvent).toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
   })
+
+  it('流式末尾 usage chunk 进入 trace 事件', async () => {
+    const events: LlmTraceEvent[] = []
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        const chunks = [
+          'data: {"choices":[{"delta":{"content":"你好"},"finish_reason":null}]}\n\n',
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+          'data: {"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}\n\n',
+          'data: [DONE]\n\n',
+        ]
+        for (const c of chunks) controller.enqueue(encoder.encode(c))
+        controller.close()
+      },
+    })
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: stream,
+    })
+
+    const client = createLlmClient({ apiKey: 'k', baseUrl: 'http://localhost', model: 'm', trace: (e) => events.push(e), onDelta: () => {} })
+    const result = await client.complete({ context: {}, messages: [{ role: 'user', content: 'hi' }] })
+
+    expect(result).toEqual({ type: 'final', output: '你好' })
+    const responseEvent = events.find((e) => e.phase === 'response')
+    expect(responseEvent).toMatchObject({ promptTokens: 4, completionTokens: 2, totalTokens: 6 })
+    expect(responseEvent?.responseBody).toMatchObject({ content_length: 2 })
+  })
 })

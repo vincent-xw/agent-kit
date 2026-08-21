@@ -82,31 +82,37 @@ export function createTokenContextManager(options: TokenContextManagerOptions): 
     )
   }
 
+  async function saveImpl(sessionId: string, messages: SessionMessage[]): Promise<void> {
+    const compressed = await runCompress(messages)
+    const state: SessionState = {
+      ...getState(sessionId),
+      raw: messages,
+      trimmed: compressed.messages,
+      compressedCount: getState(sessionId).compressedCount + (compressed.compressedCount > 0 ? 1 : 0),
+      lastUpdatedAt: new Date().toISOString(),
+    }
+    if (compressed.summary !== undefined) state.summary = compressed.summary
+    setState(sessionId, state)
+  }
+
   return {
     async save(sessionId, messages) {
-      const compressed = await runCompress(messages)
-      const state: SessionState = {
-        ...getState(sessionId),
-        raw: messages,
-        trimmed: compressed.messages,
-        compressedCount: getState(sessionId).compressedCount + (compressed.compressedCount > 0 ? 1 : 0),
-        lastUpdatedAt: new Date().toISOString(),
-      }
-      if (compressed.summary !== undefined) state.summary = compressed.summary
-      setState(sessionId, state)
+      await saveImpl(sessionId, messages)
     },
     async load(sessionId) {
       return getState(sessionId).trimmed
     },
     async append(sessionId, message) {
-      const state = getState(sessionId)
-      await this.save(sessionId, [...state.raw, message])
+      // 直接调用内部 saveImpl，避免依赖 this，方法被解构后仍可用。
+      await saveImpl(sessionId, [...getState(sessionId).raw, message])
     },
     async getSummary(sessionId) {
       return getState(sessionId).summary
     },
     onLlmTrace(event) {
       if (!event.sessionId) return
+      // 只在 manager 见过该会话时才记录 usage，避免为未知 sessionId 物化幽灵状态。
+      if (!sessions.has(event.sessionId)) return
       if (event.totalTokens && event.totalTokens > 0) {
         const state = getState(event.sessionId)
         state.lastUsageTotal = event.totalTokens
