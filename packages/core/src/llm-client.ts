@@ -43,6 +43,12 @@ export interface LlmTraceEvent {
   responseBody?: unknown
   durationMs: number
   error?: unknown
+  /** Runtime-injected session id. */
+  sessionId?: string
+  /** From response.usage when available. */
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
 }
 
 /** 一次补全请求：input 为最新用户输入，messages 为会话历史，tools 为可调用工具声明。 */
@@ -156,6 +162,17 @@ function extractResult(payload: unknown): LlmResult | null {
   return { type: 'final', output: typeof message.content === 'string' ? message.content : '', ...(reasoning ? { reasoning } : {}) }
 }
 
+function parseUsage(payload: unknown): Pick<LlmTraceEvent, 'promptTokens' | 'completionTokens' | 'totalTokens'> {
+  const result: Pick<LlmTraceEvent, 'promptTokens' | 'completionTokens' | 'totalTokens'> = {}
+  if (typeof payload !== 'object' || payload === null) return result
+  const usage = (payload as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage
+  if (!usage) return result
+  if (typeof usage.prompt_tokens === 'number') result.promptTokens = usage.prompt_tokens
+  if (typeof usage.completion_tokens === 'number') result.completionTokens = usage.completion_tokens
+  if (typeof usage.total_tokens === 'number') result.totalTokens = usage.total_tokens
+  return result
+}
+
 /**
  * 提取端点错误正文里的可读原因。
  *
@@ -266,7 +283,7 @@ async function completeJson(
         if (attempt < maxRetries) continue
         throw lastError
       }
-      trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+      trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt, ...parseUsage(payload) })
       const result = extractResult(payload)
       if (!result) {
         lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
@@ -350,7 +367,7 @@ async function completeStream(
             throw lastError
           }
         }
-        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt, ...parseUsage(payload) })
         const result = extractResult(payload)
         if (!result) {
           lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')

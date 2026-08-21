@@ -165,3 +165,26 @@ describe('LlmClient', () => {
     expect(bodyOf(fetchMock).response_format).toEqual({ type: 'json_object' })
   })
 })
+
+import type { LlmTraceEvent } from './llm-client.js'
+
+describe('usage parsing', () => {
+  it('response usage 进入 trace 事件', async () => {
+    const events: LlmTraceEvent[] = []
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        choices: [{ message: { content: 'ok' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+    })
+
+    const client = createLlmClient({ apiKey: 'k', baseUrl: 'http://localhost', model: 'm', trace: (e) => events.push(e) })
+    await client.complete({ context: {}, messages: [{ role: 'user', content: 'hi' }] })
+
+    const responseEvent = events.find((e) => e.phase === 'response')
+    expect(responseEvent).toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
+  })
+})
