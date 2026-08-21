@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 export type LogFormat = 'verbose' | 'json' | 'audit'
 
@@ -14,9 +14,15 @@ const FORMATS: LogFormat[] = ['verbose', 'json', 'audit']
 
 export function parseFileLogConfig(env: Record<string, string | undefined>, fallbackDir: string): FileLogConfig {
   const format = (env.LOG_FORMAT ?? 'verbose') as LogFormat
+  const rawDir = env.LOG_DIR
   return {
     enabled: (env.LOG_TO_FILE ?? '1') !== '0',
-    dir: env.LOG_DIR || join(fallbackDir, 'logs'),
+    // 相对 LOG_DIR 以 BFF 数据目录为基准（如 LOG_DIR=log → <数据目录>/log）
+    dir: rawDir
+      ? isAbsolute(rawDir)
+        ? rawDir
+        : join(fallbackDir, rawDir)
+      : join(fallbackDir, 'log'),
     format: FORMATS.includes(format) ? format : 'verbose',
     keepDays: Number(env.LOG_KEEP_DAYS ?? '7') || 0,
   }

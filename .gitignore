@@ -10,6 +10,8 @@ coverage/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+# BFF 按日轮转文件日志目录（运行时在 dist/log，由 dist/ 覆盖；此处兜底源码/打包场景）
+examples/flutter-dev-bff/log/
 .pnpm-store/
 .pkg-cache/
 # ime-setup.sh 记录的切换前输入法，仅本地有意义

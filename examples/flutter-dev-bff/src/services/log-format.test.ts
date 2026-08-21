@@ -2,16 +2,18 @@ import { describe, it, expect } from 'vitest'
 import { parseFileLogConfig, auditToJsonLine, llmToJsonLine } from './log-format.js'
 
 describe('parseFileLogConfig', () => {
-  it('默认值：开启、verbose、fallback 目录、7 天', () => {
+  it('默认值：开启、verbose、fallback 目录/log、7 天', () => {
     const c = parseFileLogConfig({}, '/data')
-    expect(c).toMatchObject({ enabled: true, dir: '/data/logs', format: 'verbose', keepDays: 7 })
+    expect(c).toMatchObject({ enabled: true, dir: '/data/log', format: 'verbose', keepDays: 7 })
   })
   it('LOG_TO_FILE=0 关闭', () => {
     expect(parseFileLogConfig({ LOG_TO_FILE: '0' }, '/d').enabled).toBe(false)
   })
-  it('LOG_DIR/LOG_FORMAT/LOG_KEEP_DAYS 生效', () => {
-    const c = parseFileLogConfig({ LOG_DIR: '/x', LOG_FORMAT: 'json', LOG_KEEP_DAYS: '0' }, '/d')
-    expect(c).toMatchObject({ dir: '/x', format: 'json', keepDays: 0 })
+  it('绝对 LOG_DIR 直接生效；相对 LOG_DIR 以数据目录为基准', () => {
+    expect(parseFileLogConfig({ LOG_DIR: '/x' }, '/d').dir).toBe('/x')
+    expect(parseFileLogConfig({ LOG_DIR: 'log' }, '/d').dir).toBe('/d/log')
+    const c = parseFileLogConfig({ LOG_DIR: 'log', LOG_FORMAT: 'json', LOG_KEEP_DAYS: '0' }, '/d')
+    expect(c).toMatchObject({ dir: '/d/log', format: 'json', keepDays: 0 })
   })
   it('非法格式回退 verbose', () => {
     expect(parseFileLogConfig({ LOG_FORMAT: 'nope' }, '/d').format).toBe('verbose')
