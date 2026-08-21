@@ -2,11 +2,11 @@ import type { SessionMessage } from './contracts.js'
 
 /** 会话上下文管理器：按 session 保存消息并执行窗口裁剪。 */
 export interface ContextManager {
-  load(sessionId: string): SessionMessage[]
-  save(sessionId: string, messages: SessionMessage[]): void
-  append(sessionId: string, message: SessionMessage): void
+  load(sessionId: string): SessionMessage[] | Promise<SessionMessage[]>
+  save(sessionId: string, messages: SessionMessage[]): void | Promise<void>
+  append(sessionId: string, message: SessionMessage): void | Promise<void>
   /** 返回窗口裁剪产生的摘要文本；未发生过裁剪时返回 undefined。 */
-  getSummary(sessionId: string): string | undefined
+  getSummary(sessionId: string): string | undefined | Promise<string | undefined>
 }
 
 /**
