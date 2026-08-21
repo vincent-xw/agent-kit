@@ -15,3 +15,5 @@ export { estimateTokens, estimateMessages, applyUsageCorrection } from './token-
 export { resolveContextLimit, DEFAULT_CONTEXT_LIMIT } from './model-context-limits.js'
 export { compressMessages } from './context-compressor.js'
 export type { CompressOptions, CompressResult, Summarizer } from './context-compressor.js'
+export { createTokenContextManager } from './token-context-manager.js'
+export type { ContextStatus, TokenContextManager, TokenContextManagerOptions } from './token-context-manager.js'
