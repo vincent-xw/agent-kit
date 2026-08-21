@@ -35,6 +35,15 @@
       <textarea id="input" rows="1" placeholder="输入指令，例如：启动应用并检查首页是否正常显示..." autofocus></textarea>
       <button id="send">发送</button>
       <button id="stop" class="hidden">停止</button>
+      <button id="context-btn" title="上下文状态">—</button>
+      <div id="context-popover" class="hidden">
+        <div class="context-row"><span>模型</span><span id="ctx-model">—</span></div>
+        <div class="context-row"><span>上限</span><span id="ctx-limit">—</span></div>
+        <div class="context-row"><span>已用</span><span id="ctx-used">—</span></div>
+        <div class="context-row"><span>剩余</span><span id="ctx-remaining">—</span></div>
+        <div class="context-bar"><div id="ctx-bar"></div></div>
+        <button id="ctx-compact">压缩上下文</button>
+      </div>
     </div>
     <div class="footer-copy">copyright © 2026 xuewen.jia</div>
   </main>

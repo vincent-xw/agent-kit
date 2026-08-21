@@ -159,3 +159,16 @@ header .status.connected { color: var(--accent2); }
 
 /* 底部版权 */
 .footer-copy { text-align: center; font-size: 11px; color: var(--text2); padding: 6px 0; flex-shrink: 0; }
+
+#context-btn { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text2); font-size: 12px; cursor: pointer; }
+#context-btn.ok { border-color: var(--accent2); color: var(--accent2); }
+#context-btn.warn { border-color: #f0ad4e; color: #f0ad4e; }
+#context-btn.danger { border-color: var(--error); color: var(--error); }
+#context-popover { position: absolute; bottom: 64px; right: 20px; width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 50; }
+#context-popover.hidden { display: none; }
+.context-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; color: var(--text2); }
+.context-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+#ctx-bar { height: 100%; width: 0%; background: var(--accent2); transition: width .2s, background .2s; }
+#ctx-bar.warn { background: #f0ad4e; }
+#ctx-bar.danger { background: var(--error); }
+#ctx-compact { width: 100%; padding: 6px; border: none; border-radius: 6px; background: var(--accent); color: var(--bg); font-size: 12px; cursor: pointer; }

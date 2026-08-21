@@ -7,12 +7,15 @@ const promptEl = $('prompt')
 const inputEl = $('input')
 const sendBtn = $('send')
 const stopBtn = $('stop')
+const contextBtn = $('context-btn')
+const contextPopover = $('context-popover')
 
 let sessions = []
 let currentSessionId = null
 let running = false
 let stopRequested = false
 let showToolDetails = localStorage.getItem('show_tool_details') === '1'
+let contextVisible = false
 
 // BFF 在 harness 调用前会给 sessionId 加上身份前缀（如 flutter-dev:xxx），
 // 但 WebUI 的会话列表、视图与 localStorage 都使用原始 id，因此事件需要归一化。
@@ -102,6 +105,7 @@ async function switchSession(sessionId) {
     await restoreHistory(sessionId, view)
   }
   inputEl.focus()
+  await refreshContext()
 }
 
 async function renameSession(sessionId, title) {
@@ -519,9 +523,12 @@ async function maybeAutoTitle(sessionId, firstMessage) {
 }
 
 // ── 输入区 ──
-sendBtn.addEventListener('click', () => {
+sendBtn.addEventListener('click', async () => {
   const text = inputEl.value.trim()
-  if (text) sendMessage(text)
+  if (text) {
+    await sendMessage(text)
+    await refreshContext()
+  }
 })
 
 inputEl.addEventListener('keydown', (e) => {
@@ -538,6 +545,38 @@ inputEl.addEventListener('input', () => {
 })
 
 stopBtn.addEventListener('click', () => { stopRequested = true })
+
+async function refreshContext() {
+  if (!currentSessionId) return
+  try {
+    const data = await api(`/api/sessions/${encodeURIComponent(currentSessionId)}/context`)
+    const ratio = Math.min(1, Math.max(0, data.ratio ?? 0))
+    const pct = Math.round(ratio * 100)
+    contextBtn.textContent = `${pct}%`
+    contextBtn.className = ratio < 0.6 ? 'ok' : ratio < 0.8 ? 'warn' : 'danger'
+    $('ctx-model').textContent = data.model ?? '—'
+    $('ctx-limit').textContent = data.limit?.toLocaleString() ?? '—'
+    $('ctx-used').textContent = data.used?.toLocaleString() ?? '—'
+    $('ctx-remaining').textContent = data.remaining?.toLocaleString() ?? '—'
+    const bar = $('ctx-bar')
+    bar.style.width = `${pct}%`
+    bar.className = ratio < 0.6 ? '' : ratio < 0.8 ? 'warn' : 'danger'
+  } catch {
+    contextBtn.textContent = '—'
+  }
+}
+
+contextBtn.addEventListener('click', () => {
+  contextVisible = !contextVisible
+  contextPopover.classList.toggle('hidden', !contextVisible)
+  if (contextVisible) refreshContext()
+})
+
+$('ctx-compact').addEventListener('click', async () => {
+  if (!currentSessionId) return
+  await api(`/api/sessions/${encodeURIComponent(currentSessionId)}/context/compact`, { method: 'POST' })
+  await refreshContext()
+})
 
 $('docs-btn').addEventListener('click', () => {
   window.open('guide.html', '_blank', 'noopener')
