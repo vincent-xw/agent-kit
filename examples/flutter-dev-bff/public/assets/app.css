@@ -156,3 +156,6 @@ header .status.connected { color: var(--accent2); }
 .ask-input-row { display: flex; }
 .ask-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px; }
 .ask-submit { align-self: flex-end; padding: 8px 16px; background: var(--accent); color: var(--bg); border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; }
+
+/* 底部版权 */
+.footer-copy { text-align: center; font-size: 11px; color: var(--text2); padding: 6px 0; flex-shrink: 0; }
