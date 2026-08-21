@@ -129,11 +129,11 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
    * 应用上下文裁剪，并把裁剪摘要作为 system 消息前置。
    * 不注入摘要的话模型不知道自己丢了上下文——它会以为看到的就是完整历史。
    */
-  function trimHistory(sessionId: string, history: SessionMessage[]): SessionMessage[] {
+  async function trimHistory(sessionId: string, history: SessionMessage[]): Promise<SessionMessage[]> {
     if (!deps.context) return history
-    deps.context.save(sessionId, history)
-    const trimmed = deps.context.load(sessionId)
-    const summary = deps.context.getSummary(sessionId)
+    await deps.context.save(sessionId, history)
+    const trimmed = await deps.context.load(sessionId)
+    const summary = await deps.context.getSummary(sessionId)
     if (!summary) return trimmed
     return [{ role: 'system', content: summary }, ...trimmed]
   }
@@ -181,7 +181,7 @@ export function createAgentHarness(deps: AgentHarnessDependencies): AgentHarness
           ...(pendingInput ? { input: pendingInput } : {}),
           context,
           sessionId,
-          messages: trimHistory(sessionId, history),
+          messages: await trimHistory(sessionId, history),
           ...(prompt?.prompt ? { systemPrompt: prompt.prompt } : {}),
           ...(toolSchemas.length > 0 ? { tools: toolSchemas } : {}),
           ...(prompt?.protocol ? { responseFormatJson: true } : {}),

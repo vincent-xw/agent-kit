@@ -1,3 +1,4 @@
+import type { ContextManager, LlmTraceEvent } from '@agent-kit/core'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -100,6 +101,38 @@ describe('SQLite SecretProvider', () => {
     await expect(second.harness.resume({ sessionId: 's-2', callId: 'call-r', output: { title: '首页' } })).resolves.toEqual({ type: 'final', output: '首页' })
   })
 
+})
+
+describe('SQLite runtime contextManager 追踪转发', () => {
+  it('llmTrace 事件注入 sessionId 并转发给 contextManager.onLlmTrace', async () => {
+    const database = new DatabaseSync(':memory:')
+    const traceEvents: LlmTraceEvent[] = []
+    const contextTraceEvents: LlmTraceEvent[] = []
+    const contextManager: ContextManager & { onLlmTrace?: (event: LlmTraceEvent) => void } = {
+      load: () => [],
+      save: () => {},
+      append: () => {},
+      getSummary: () => undefined,
+      onLlmTrace: (event) => contextTraceEvents.push(event),
+    }
+    const runtime = createSqliteAgentRuntime({
+      database,
+      masterKey: validMasterKey,
+      maxSteps: 3,
+      contextManager,
+      llmTrace: (event) => traceEvents.push(event),
+    })
+    await runtime.secrets.put({ apiKey: 'sk-test', baseUrl: 'https://llm.example.test/v1', model: 'test-model' })
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '你好' } }] }) })))
+
+    await runtime.harness.run({ sessionId: 's-trace', input: 'hi', context: {} })
+
+    expect(traceEvents.length).toBeGreaterThan(0)
+    expect(contextTraceEvents.length).toBeGreaterThan(0)
+    expect(traceEvents[0]).toMatchObject({ sessionId: 's-trace' })
+    expect(contextTraceEvents[0]).toMatchObject({ sessionId: 's-trace' })
+    database.close()
+  })
 })
 
 describe('SQLite runtime 流式 delta 标注', () => {

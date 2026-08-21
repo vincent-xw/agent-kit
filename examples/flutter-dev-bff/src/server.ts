@@ -29,8 +29,10 @@ import {
   createLlmClient,
   createLlmVerboseLogger,
   createPromptRegistry,
+  createTokenContextManager,
+  resolveContextLimit,
 } from '@agent-kit/core'
-import type { AuditLogger, LlmClient, LlmSecret, LlmTraceEvent, SessionMessage } from '@agent-kit/core'
+import type { AgentHarness, AuditLogger, LlmClient, LlmSecret, LlmTraceEvent, SessionMessage } from '@agent-kit/core'
 
 import { createFlutterToolDefinitions } from './flutter-tools.js'
 import { debuggingPrompt, freeFormPrompt, testingPrompt } from './prompts.js'
@@ -167,12 +169,18 @@ export async function createFlutterDevBff(options: {
     if (skill) prompts.register({ name: `skill-${s.slug}`, version: skill.meta.version, prompt: skill.prompt })
   }
 
+  const mainContextManager = createTokenContextManager({
+    model: process.env.LLM_MODEL ?? 'unknown',
+    limit: resolveContextLimit(process.env.LLM_MODEL ?? 'unknown', process.env.LLM_CONTEXT_LIMIT),
+  })
+
   const runtime = createSqliteAgentRuntime({
     database,
     masterKey: options.masterKey,
     prompts,
     audit,
     maxSteps: 50,
+    contextManager: mainContextManager,
     ...(options.llmTrace
       ? {
           llmTrace: (event: LlmTraceEvent) => {
@@ -185,6 +193,16 @@ export async function createFlutterDevBff(options: {
       bus.emit({ type: 'llm_delta', ...delta })
     },
     ...(options.llmMaxRetries !== undefined ? { llmMaxRetries: options.llmMaxRetries } : {}),
+  })
+  mainContextManager.setSummarizer(async (messages) => {
+    const secret = await runtime.secrets.get()
+    const result = await createLlmClient({ ...secret, maxRetries: 1 }).complete({
+      context: {},
+      messages,
+      systemPrompt: '请把以下对话总结成一段简洁的上下文摘要，保留关键决策、代码改动、错误结论， omit 具体实现细节和重复的工具输出。',
+    })
+    const output = result.type === 'final' ? result.output : result.calls
+    return typeof output === 'string' ? output : JSON.stringify(output)
   })
   for (const tool of instrumentTools(finalToolList, bus)) runtime.tools.register(tool)
 
@@ -215,12 +233,36 @@ export async function createFlutterDevBff(options: {
     },
   }
 
+  async function persistCompressed(sessionId: string) {
+    const messages = await runtime.sessions.load(sessionId)
+    const compressed = await mainContextManager.forceCompress(sessionId, messages)
+    await runtime.sessions.save(sessionId, compressed)
+  }
+
+  const harness: AgentHarness = {
+    run: async (request) => {
+      const result = await runtime.harness.run(request)
+      await persistCompressed(request.sessionId)
+      return result
+    },
+    continue: async (request) => {
+      const result = await runtime.harness.continue(request)
+      await persistCompressed(request.sessionId)
+      return result
+    },
+    resume: async (request) => {
+      const result = await runtime.harness.resume(request)
+      await persistCompressed(request.sessionId)
+      return result
+    },
+  }
+
   const app = createAgentBff({
     authenticate: async (request) => {
       const token = request.headers.get('authorization')?.replace(/^Bearer\s+/, '')
       return token && token === options.apiToken ? { subject: 'flutter-dev' } : null
     },
-    harness: runtime.harness,
+    harness,
     audit,
   })
 
@@ -320,6 +362,28 @@ export async function createFlutterDevBff(options: {
       .get(scopedId) as { messages?: string } | undefined
     if (!row?.messages) return c.json({ messages: [] })
     return c.json({ messages: JSON.parse(row.messages) })
+  })
+
+  // 上下文窗口状态与手动压缩
+  app.get('/api/sessions/:sessionId/context', (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const scopedId = `flutter-dev:${c.req.param('sessionId')}`
+    const row = database.prepare('SELECT messages FROM agent_sessions WHERE session_id = ?').get(scopedId) as { messages?: string } | undefined
+    const messages: SessionMessage[] = row?.messages ? JSON.parse(row.messages) : []
+    mainContextManager.sync(scopedId, messages)
+    return c.json(mainContextManager.getStatus(scopedId))
+  })
+
+  app.post('/api/sessions/:sessionId/context/compact', async (c) => {
+    const token = c.req.header('authorization')?.replace(/^Bearer\s+/, '')
+    if (token !== options.apiToken) return c.json({ error: 'unauthorized' }, 401)
+    const scopedId = `flutter-dev:${c.req.param('sessionId')}`
+    const row = database.prepare('SELECT messages FROM agent_sessions WHERE session_id = ?').get(scopedId) as { messages?: string } | undefined
+    const messages: SessionMessage[] = row?.messages ? JSON.parse(row.messages) : []
+    const compressed = await mainContextManager.forceCompress(scopedId, messages)
+    await runtime.sessions.save(scopedId, compressed)
+    return c.json(mainContextManager.getStatus(scopedId))
   })
 
   // 一键复制上下文：服务端生成完整 Markdown 转录，与前端显示开关无关

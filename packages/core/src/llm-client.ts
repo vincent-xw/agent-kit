@@ -43,6 +43,12 @@ export interface LlmTraceEvent {
   responseBody?: unknown
   durationMs: number
   error?: unknown
+  /** Runtime-injected session id. */
+  sessionId?: string
+  /** From response.usage when available. */
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
 }
 
 /** 一次补全请求：input 为最新用户输入，messages 为会话历史，tools 为可调用工具声明。 */
@@ -156,6 +162,17 @@ function extractResult(payload: unknown): LlmResult | null {
   return { type: 'final', output: typeof message.content === 'string' ? message.content : '', ...(reasoning ? { reasoning } : {}) }
 }
 
+function parseUsage(payload: unknown): Pick<LlmTraceEvent, 'promptTokens' | 'completionTokens' | 'totalTokens'> {
+  const result: Pick<LlmTraceEvent, 'promptTokens' | 'completionTokens' | 'totalTokens'> = {}
+  if (typeof payload !== 'object' || payload === null) return result
+  const usage = (payload as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage
+  if (!usage) return result
+  if (typeof usage.prompt_tokens === 'number') result.promptTokens = usage.prompt_tokens
+  if (typeof usage.completion_tokens === 'number') result.completionTokens = usage.completion_tokens
+  if (typeof usage.total_tokens === 'number') result.totalTokens = usage.total_tokens
+  return result
+}
+
 /**
  * 提取端点错误正文里的可读原因。
  *
@@ -266,7 +283,7 @@ async function completeJson(
         if (attempt < maxRetries) continue
         throw lastError
       }
-      trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+      trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt, ...parseUsage(payload) })
       const result = extractResult(payload)
       if (!result) {
         lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
@@ -286,6 +303,8 @@ interface StreamAccumulator {
   reasoning: string
   toolCalls: Map<number, { id: string; name: string; arguments: string }>
   finishReason: string | null
+  /** 流式过程中遇到的 usage（末尾独立 usage chunk），用于 trace 上报。 */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
 }
 
 async function completeStream(
@@ -350,7 +369,7 @@ async function completeStream(
             throw lastError
           }
         }
-        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt })
+        trace?.({ requestId, phase: 'response', responseBody: payload, durationMs: Date.now() - startedAt, ...parseUsage(payload) })
         const result = extractResult(payload)
         if (!result) {
           lastError = new AgentKitError('LLM_RESPONSE_INVALID', 'LLM 响应缺少合法 choices 或 tool_calls')
@@ -405,6 +424,8 @@ async function completeStream(
         phase: 'response',
         responseBody: { content_length: acc.content.length, tool_calls: acc.toolCalls.size, finish_reason: acc.finishReason },
         durationMs: Date.now() - startedAt,
+        // 流式路径的 usage 以末尾独立 chunk 到达，须单独解析并随 trace 上报。
+        ...parseUsage({ usage: acc.usage }),
       })
 
       return assembleStreamResult(acc)
@@ -429,6 +450,8 @@ interface StreamChunk {
     }
     finish_reason?: string | null
   }>
+  /** 流式末尾的独立 usage chunk（无 choices）。 */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
 }
 
 function processStreamChunk(
@@ -436,6 +459,10 @@ function processStreamChunk(
   acc: StreamAccumulator,
   onDelta: (delta: { content?: string; reasoning?: string }) => void,
 ): void {
+  // usage 以末尾独立 chunk 到达，先于 choices 判断捕获，避免被 early return 跳过。
+  if (chunk.usage) {
+    acc.usage = chunk.usage
+  }
   const choice = chunk.choices?.[0]
   if (!choice) return
   if (choice.finish_reason) acc.finishReason = choice.finish_reason

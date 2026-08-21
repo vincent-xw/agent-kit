@@ -33,6 +33,7 @@ function run(
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('flutter-dev-bff 鉴权', () => {
@@ -220,6 +221,67 @@ describe('静态资源路由', () => {
     const { app, database } = await bff()
     expect((await app.request('/assets/../src/server.ts')).status).toBe(404)
     expect((await app.request('/assets/nope.css')).status).toBe(404)
+    database.close()
+  })
+})
+
+describe('上下文窗口端点', () => {
+  const auth = { 'content-type': 'application/json', authorization: 'Bearer token-1' }
+
+  it('GET /api/sessions/:id/context 返回上下文状态', async () => {
+    const { app, database } = await bff()
+    database
+      .prepare('INSERT INTO agent_sessions (session_id, messages, updated_at) VALUES (?, ?, ?)')
+      .run('flutter-dev:ctx-1', JSON.stringify([
+        { role: 'user', content: '你好' },
+        { role: 'assistant', content: '好的' },
+      ]), new Date().toISOString())
+
+    const res = await app.request('/api/sessions/ctx-1/context', { headers: auth })
+    expect(res.status).toBe(200)
+    const status = await res.json() as { model?: string; limit?: number; used?: number; remaining?: number; compressedCount?: number }
+    expect(status.model).toBeTruthy()
+    // 未设置 LLM_CONTEXT_LIMIT 时回落默认 256K
+    expect(status.limit).toBe(256000)
+    expect(status.used).toBeGreaterThanOrEqual(0)
+    expect(status.remaining).toBeGreaterThanOrEqual(0)
+    expect(status.compressedCount).toBe(0)
+
+    // 未鉴权返回 401
+    expect((await app.request('/api/sessions/ctx-1/context')).status).toBe(401)
+    database.close()
+  })
+
+  it('POST /api/sessions/:id/context/compact 压缩历史', async () => {
+    // 压低上限以触发达成水位的压缩（仅丢弃旧工具轮次，不调用外部摘要模型）
+    vi.stubEnv('LLM_CONTEXT_LIMIT', '120')
+    const { app, database } = await bff()
+    const history = [
+      { role: 'assistant', content: null, toolCalls: [{ callId: 'c1', toolName: 't', input: {} }] },
+      { role: 'tool', content: { data: 'y'.repeat(500) }, callId: 'c1', toolName: 't' },
+      { role: 'assistant', content: null, toolCalls: [{ callId: 'c2', toolName: 't', input: {} }] },
+      { role: 'tool', content: { data: 'z'.repeat(500) }, callId: 'c2', toolName: 't' },
+      { role: 'assistant', content: '第1步' },
+      { role: 'assistant', content: '第2步' },
+      { role: 'assistant', content: '结果' },
+    ]
+    database
+      .prepare('INSERT INTO agent_sessions (session_id, messages, updated_at) VALUES (?, ?, ?)')
+      .run('flutter-dev:ctx-2', JSON.stringify(history), new Date().toISOString())
+
+    const before = await (await app.request('/api/sessions/ctx-2/context', { headers: auth })).json() as { used?: number }
+    const res = await app.request('/api/sessions/ctx-2/context/compact', { method: 'POST', headers: auth })
+    expect(res.status).toBe(200)
+    const after = await res.json() as { used?: number; remaining?: number; compressedCount?: number }
+    expect(after.compressedCount).toBeGreaterThan(0)
+    expect(after.used).toBeGreaterThanOrEqual(0)
+    expect(after.remaining).toBeGreaterThanOrEqual(0)
+    expect(after.used as number).toBeLessThan(before.used as number)
+
+    // 压缩结果已持久化：占体积的工具轮次被丢弃
+    const row = database.prepare('SELECT messages FROM agent_sessions WHERE session_id = ?').get('flutter-dev:ctx-2') as { messages: string }
+    const saved = JSON.parse(row.messages) as Array<{ role?: string }>
+    expect(saved.some((m) => m.role === 'tool')).toBe(false)
     database.close()
   })
 })
