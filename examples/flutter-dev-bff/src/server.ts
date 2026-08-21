@@ -48,6 +48,8 @@ import { ToolLoader } from './services/tool-loader.js'
 import { createAskService } from './services/ask-service.js'
 import { createHostPolicyService } from './services/host-policy.js'
 import { createWorkspaceStore } from './services/workspace-store.js'
+import { parseFileLogConfig, auditToJsonLine, llmToJsonLine } from './services/log-format.js'
+import { createFileLogger, type FileLoggerHandle } from './services/file-logger.js'
 import { createHostToolDefinitions } from './tools/host-tools.js'
 import { createUserInteractionToolDefinitions } from './tools/user-interaction-tools.js'
 import { homedir, tmpdir } from 'node:os'
@@ -586,6 +588,19 @@ function ensureEnvTemplate(): void {
     '# LLM_MAX_RETRIES=3',
     '# PORT=8788',
     '',
+    '# ── 文件日志（按日轮转，默认开启）──',
+    '# 总开关：1=开启写日志文件；0=关闭',
+    '# LOG_TO_FILE=1',
+    '# 日志目录（默认 BFF 数据目录/logs）',
+    '# LOG_DIR=',
+    '# LOG_FORMAT 支持的 3 种：',
+    '#   verbose —— 多行人类可读，含完整 LLM 输入输出（Prompt、会话历史、工具调用、模型原文），体量最大、不含 API Key',
+    '#   json    —— 每条事件一行 JSON，便于脚本/工具解析',
+    '#   audit   —— 仅非敏感摘要（requestId、模型、工具、耗时、HTTP 状态、错误码），不含 Prompt/业务内容',
+    '# LOG_FORMAT=verbose',
+    '# 保留文件天数，0=永久保留；仅启动时读取，改动需重启',
+    '# LOG_KEEP_DAYS=7',
+    '',
   ].join('\n')
   try {
     writeFileSync(envPath, template, 'utf-8')
@@ -622,8 +637,46 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
     process.exit(1)
   }
   const logLevel = process.env.LOG_LEVEL ?? 'info'
-  const llmTrace = logLevel === 'verbose' ? createLlmVerboseLogger({ prefix: '[flutter-bff:llm]' }) : undefined
-  if (llmTrace) console.log('[flutter-bff] LOG_LEVEL=verbose')
+  const consoleLlm = logLevel === 'verbose' ? createLlmVerboseLogger({ prefix: '[flutter-bff:llm]' }) : undefined
+  if (consoleLlm) console.log('[flutter-bff] LOG_LEVEL=verbose')
+
+  // ── 按日轮转文件日志（常驻，默认开启），与 console 双写 ──
+  const fileLogConfig = parseFileLogConfig(process.env, getProgramDir())
+  let fileLogger: FileLoggerHandle | undefined
+  let fileAudit: AuditLogger | undefined
+  let fileLlm: ((event: LlmTraceEvent) => void) | undefined
+  if (fileLogConfig.enabled) {
+    try {
+      fileLogger = createFileLogger(fileLogConfig)
+      const sink = fileLogger.sink
+      // console 的 audit sink 需要同时实现 log 与 error，这里都落到文件 sink
+      const fileSinkFull = { log: (m: string) => sink.log(m), error: (m: string) => sink.log(m) }
+      if (fileLogConfig.format === 'json') {
+        fileAudit = { log: (e) => { const l = auditToJsonLine(e); if (l) sink.log(l) } }
+        fileLlm = (e) => { const l = llmToJsonLine(e); if (l) sink.log(l) }
+      } else if (fileLogConfig.format === 'verbose') {
+        fileAudit = createConsoleAuditLogger({ prefix: '[file]', sink: fileSinkFull })
+        fileLlm = createLlmVerboseLogger({ prefix: '[file:llm]', sink: fileSinkFull })
+      } else {
+        fileAudit = createConsoleAuditLogger({ prefix: '[file]', sink: fileSinkFull })
+      }
+      console.log(`[flutter-bff] 文件日志已开启：${join(fileLogConfig.dir, 'bff-*.log')} format=${fileLogConfig.format} keep=${fileLogConfig.keepDays}天`)
+    } catch (error) {
+      console.error(`[flutter-bff] 文件日志初始化失败，已降级为 console：${error instanceof Error ? error.message : String(error)}`)
+      fileLogger = undefined
+    }
+  }
+
+  // 组合审计：console + 文件
+  const baseAudit = createConsoleAuditLogger({ prefix: '[flutter-bff]' })
+  const auditLogger: AuditLogger = fileAudit
+    ? { log: (e) => { baseAudit.log(e); fileAudit.log(e) } }
+    : baseAudit
+  // 组合 LLM trace：console（LOG_LEVEL=verbose 时）+ 文件（LOG_FORMAT 非 audit 时）
+  const llmTraceComposite: ((event: LlmTraceEvent) => void) | undefined =
+    consoleLlm || fileLlm
+      ? (e) => { consoleLlm?.(e); fileLlm?.(e) }
+      : undefined
   const llmMaxRetries = Number(process.env.LLM_MAX_RETRIES ?? '3')
   const port = Number(process.env.PORT ?? '8788')
   const dbPath = join(getProgramDir(), 'flutter-dev-bff.sqlite')
@@ -640,7 +693,8 @@ if (process.argv[1] && isMainModule && !process.env.VITEST) {
     flutterProjectPath: projectPath,
     databasePath: dbPath,
     llm: { apiKey, baseUrl, model },
-    ...(llmTrace ? { llmTrace } : {}),
+    ...(llmTraceComposite ? { llmTrace: llmTraceComposite } : {}),
+    ...{ audit: auditLogger },
     llmMaxRetries,
     ...(vision ? { vision } : {}),
   })

@@ -27,8 +27,8 @@ export function createFileLogger(config: FileLogConfig): FileLoggerHandle {
       return new Promise<void>((resolve) => {
         const done = () => resolve()
         transport.once('closed', done)
-        transport.close(() => done())
-        // 兜底：避免某些状态下 close 回调永不触发而挂起
+        try { transport.close?.() } catch { /* ignore */ }
+        // 兜底：避免某些状态下 close 永不触发而挂起
         setTimeout(done, 1000)
       })
     },
